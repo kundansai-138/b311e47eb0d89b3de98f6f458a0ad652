@@ -12,9 +12,9 @@
 
 The additional cases cover a 700-link identity chain, an unused minimum ID, UTF-8 ordering, NUL/tab/CR in valid IDs, 6,000 leading zeroes, oversized epoch values, dedup-before-validation, malformed quoting, exact 24-hour/30-minute/seven-day boundaries, click ties, leap days, midnight sessions, and empty outputs.
 
-## Local scale measurements
+## Initial implementation local scale measurements
 
-Each measurement below is one end-to-end local process run, including Python startup, native processing, and Parquet export. Eight workers; Windows host with 20 logical CPUs and 31.7 GiB RAM; Rust 1.99.0; Python 3.12; PyArrow 24.0.0. Workers were not CPU-affinity pinned. Input was recently generated and may have benefited from the filesystem cache.
+These measurements describe baseline commit `b012c755514a34b5c4949b9bc315a733bf28e261`, before the later eager-parsing and dense-counter optimizations. Each measurement below is one end-to-end local process run, including Python startup, native processing, and Parquet export. Eight workers; Windows host with 20 logical CPUs and 31.7 GiB RAM; Rust 1.99.0; Python 3.12; PyArrow 24.0.0. Workers were not CPU-affinity pinned. Input was recently generated and may have benefited from the filesystem cache.
 
 | Generated events / clicks | Seed | Input bytes | Wall time | Peak sampled process-tree RSS | Scratch + output |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -27,6 +27,6 @@ RSS was sampled about every 20 ms using psutil, summing the launcher and its chi
 
 ## Checks still required in the target environment
 
-The Linux/amd64 image for commit `b012c755514a34b5c4949b9bc315a733bf28e261` built successfully in 34 seconds on GitHub Actions using Rust 1.90. Both fixture suites (78 cases) passed inside the image with a read-only root, non-root UID, no network, and a 64 MB `/tmp`. The full workflow completed successfully: https://github.com/Prudhv1Raju/shopping-sessions/actions/runs/44837718726. These tiny fixtures used two CPUs and 5 GB RAM; they do not validate full-size cgroup memory behavior. Local native compilation used Rust 1.99.
+The initial Linux/amd64 image built successfully in 34 seconds on GitHub Actions using Rust 1.90. Commit `8e5f263e969d7070f8baf5c9d1e55a15579f5c37` subsequently passed both fixture suites and the public dev answer digest check under the requested GitHub account. Both fixture suites (78 cases) passed inside the image with a read-only root, non-root UID, no network, and a 64 MB `/tmp`. The full workflow completed successfully: https://github.com/kundansai-138/shopping-sessions/actions/runs/44839106789. These tiny fixtures used two CPUs and 5 GB RAM; they do not validate full-size cgroup memory behavior. Local native compilation used Rust 1.99.
 
-The 20M and 60M runs are resource/invariant checks, not full comparisons against a hidden reference. Local Windows timings are not predictions or guarantees of Google Cloud scorer timing, hidden-data correctness, image size/build time, or leaderboard position. The public repository is https://github.com/Prudhv1Raju/shopping-sessions. Submitting the chosen commit to the competition scorer remains an external step.
+The 20M and 60M runs are resource/invariant checks, not full comparisons against a hidden reference. Local Windows timings are not predictions or guarantees of Google Cloud scorer timing, hidden-data correctness, image size/build time, or leaderboard position. The public repository is https://github.com/kundansai-138/shopping-sessions. Submitting the chosen commit to the competition scorer remains an external step.

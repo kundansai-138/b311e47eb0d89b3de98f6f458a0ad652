@@ -151,7 +151,8 @@ fn root(parents: &mut [usize], mut i: usize) -> usize {
     while parents[i]!=i {parents[i]=parents[parents[i]];i=parents[i];} i
 }
 fn identities(files: &[Vec<u8>]) -> Identity<'_> {
-    let mut ids=Map::default();let mut names=Vec::new();let mut parents=Vec::new();let mut sizes=Vec::new();let mut minima=Vec::new();
+    let reserve=files.iter().map(|f|body(f).iter().filter(|&&b|b==b'\n').count().saturating_mul(2)).sum::<usize>();
+    let mut ids=Map::with_capacity_and_hasher(reserve,Default::default());let mut names=Vec::with_capacity(reserve);let mut parents=Vec::with_capacity(reserve);let mut sizes=Vec::with_capacity(reserve);let mut minima=Vec::with_capacity(reserve);
     for data in files {
         for line in body(data).split(|&b|b==b'\n') {
             let Some([a,b])=fields::<2>(line) else {continue;};
@@ -196,7 +197,9 @@ fn catalog<'a>(products: &'a [u8], campaigns: &'a [u8]) -> Catalog<'a> {
 }
 
 #[derive(Clone,Copy)]
-struct Raw<'a> {hash:u64,line:&'a [u8],ingest:i64}
+// Validation is computed while fields are hot, but invalid copies remain as
+// tombstones (empty person) until the earliest ingest is selected globally.
+struct Raw<'a> {hash:u64,id:&'a [u8],person:&'a [u8],ingest:i64,ts:i64,revenue:u32,category:u32}
 #[derive(Clone,Copy)]
 struct Event<'a> {hash:u64,person:&'a [u8],ts:i64,revenue:u32,category:u32}
 #[derive(Clone,Copy)]
@@ -210,7 +213,7 @@ fn flatten<T>(parts: Vec<Vec<T>>) -> Vec<T> {
     let mut result=Vec::with_capacity(parts.iter().map(Vec::len).sum());
     for mut part in parts {result.append(&mut part);}result
 }
-fn parse_events<'a>(tasks: &[&'a [u8]], ncpu:usize, partitions:usize) -> Vec<Vec<Vec<Raw<'a>>>> {
+fn parse_events<'a>(tasks: &[&'a [u8]], identity:&Identity<'a>, catalog:&Catalog<'a>, start:i64, end:i64, ncpu:usize, partitions:usize) -> Vec<Vec<Vec<Raw<'a>>>> {
     let next=AtomicUsize::new(0);
     let workers=thread::scope(|s| {
         let handles:Vec<_>=(0..ncpu).map(|_|s.spawn(|| {
@@ -223,7 +226,8 @@ fn parse_events<'a>(tasks: &[&'a [u8]], ncpu:usize, partitions:usize) -> Vec<Vec
                     if f[0].is_empty() {continue;}
                     let Some(ingest)=timestamp(f[3]) else {continue;};
                     let hash=hash_bytes(f[0]);
-                    result[(hash as usize)%partitions].push(Raw{hash,line,ingest});
+                    let (person,ts,revenue,category)=validate_fields(f,ingest,identity,catalog,start,end).unwrap_or((&[],0,0,0));
+                    result[(hash as usize)%partitions].push(Raw{hash,id:f[0],person,ingest,ts,revenue,category});
                 }
             } result
         })).collect();
@@ -232,25 +236,25 @@ fn parse_events<'a>(tasks: &[&'a [u8]], ncpu:usize, partitions:usize) -> Vec<Vec
     transpose(workers,partitions)
 }
 #[inline]
-fn raw_id(raw:Raw<'_>) -> &[u8] {
-    let end=raw.line.iter().position(|&b|b==b',').unwrap();
-    field(&raw.line[..end]).unwrap()
+fn raw_id(raw:Raw<'_>) -> &[u8] {raw.id}
+#[inline]
+fn accepted(raw:Raw<'_>) -> Option<Event<'_>> {
+    if raw.person.is_empty(){return None;}
+    Some(Event{hash:hash_bytes(raw.person),person:raw.person,ts:raw.ts,revenue:raw.revenue,category:raw.category})
 }
-fn validate<'a>(raw:Raw<'a>, identity:&Identity<'a>, catalog:&Catalog<'a>, start:i64,end:i64) -> Option<Event<'a>> {
-    let f=fields::<7>(raw.line).unwrap();
+fn validate_fields<'a>(f:[&'a [u8];7],ingest:i64,identity:&Identity<'a>,catalog:&Catalog<'a>,start:i64,end:i64)->Option<(&'a [u8],i64,u32,u32)> {
     if f[1].is_empty() || f[5].is_empty() {return None;}
     let ts=timestamp(f[2])?;
-    if ts<start || ts>=end || raw.ingest-ts>DAY {return None;}
+    if ts<start || ts>=end || ingest-ts>DAY {return None;}
     let revenue=match f[4] {
         b"view"|b"cart"=>0,
-        b"purchase"=> {let price=digits(f[6])?;if !(1..=10_000_000).contains(&price){return None;}price as u32},
+        b"purchase"=>{let price=digits(f[6])?;if !(1..=10_000_000).contains(&price){return None;}price as u32},
         _=>return None,
     };
-    let category=if revenue==0 {0} else {catalog.products.get(f[5]).copied().unwrap_or_else(||catalog.categories.binary_search(&&b"unknown"[..]).unwrap() as u32)};
-    let person=identity.person(f[1]);
-    Some(Event{hash:hash_bytes(person),person,ts,revenue,category})
+    let category=if revenue==0{0}else{catalog.products.get(f[5]).copied().unwrap_or_else(||catalog.categories.binary_search(&&b"unknown"[..]).unwrap() as u32)};
+    Some((identity.person(f[1]),ts,revenue,category))
 }
-fn dedup_events<'a>(inputs:Vec<Vec<Vec<Raw<'a>>>>, identity:&Identity<'a>, catalog:&Catalog<'a>, start:i64,end:i64,ncpu:usize,partitions:usize) -> Vec<Vec<Vec<Event<'a>>>> {
+fn dedup_events<'a>(inputs:Vec<Vec<Vec<Raw<'a>>>>,ncpu:usize,partitions:usize) -> Vec<Vec<Vec<Event<'a>>>> {
     let jobs:Vec<_>=inputs.into_iter().map(|x|Mutex::new(Some(x))).collect();
     let next=AtomicUsize::new(0);
     let workers=thread::scope(|s| {
@@ -266,7 +270,7 @@ fn dedup_events<'a>(inputs:Vec<Vec<Vec<Raw<'a>>>>, identity:&Identity<'a>, catal
                     let mut last=pos+1;
                     while last<rows.len() && rows[last].hash==rows[pos].hash {last+=1;}
                     if last==pos+1 {
-                        if let Some(e)=validate(rows[pos],identity,catalog,start,end) {output[(e.hash as usize)%partitions].push(e);}
+                        if let Some(e)=accepted(rows[pos]) {output[(e.hash as usize)%partitions].push(e);}
                     } else {
                         // Usually one event and a few duplicates. Preserve separate
                         // IDs even if their full 64-bit hashes collide.
@@ -278,7 +282,7 @@ fn dedup_events<'a>(inputs:Vec<Vec<Vec<Raw<'a>>>>, identity:&Identity<'a>, catal
                             } else {kept.push(r);}
                         }
                         for r in kept {
-                            if let Some(e)=validate(r,identity,catalog,start,end) {output[(e.hash as usize)%partitions].push(e);}
+                            if let Some(e)=accepted(r) {output[(e.hash as usize)%partitions].push(e);}
                         }
                     }
                     pos=last;
@@ -357,6 +361,37 @@ impl UserWriter {
 #[derive(Default,Clone,Copy)]
 struct CampaignAgg {sessions:i64,purchasing:i64,revenue:i64,assisted:i64}
 type CampaignMap=Map<(u32,i32),CampaignAgg>;
+enum CampaignTotals {
+    Dense {base:i32,campaigns:usize,rows:Vec<CampaignAgg>},
+    Sparse(CampaignMap),
+}
+impl CampaignTotals {
+    fn new(base:i32,days:usize,campaigns:usize)->Self {
+        match days.checked_mul(campaigns) {
+            Some(cells) if cells<=262_144=>Self::Dense{base,campaigns,rows:vec![CampaignAgg::default();cells]},
+            _=>Self::Sparse(CampaignMap::default()),
+        }
+    }
+    #[inline]
+    fn at(&mut self,campaign:u32,day:i32)->&mut CampaignAgg {
+        match self {
+            Self::Dense{base,campaigns,rows}=>&mut rows[(day-*base) as usize* *campaigns+campaign as usize],
+            Self::Sparse(rows)=>rows.entry((campaign,day)).or_default(),
+        }
+    }
+    fn into_map(self)->CampaignMap {
+        match self {
+            Self::Sparse(rows)=>rows,
+            Self::Dense{base,campaigns,rows}=>{
+                let mut map=CampaignMap::default();
+                for (i,row) in rows.into_iter().enumerate(){
+                    if row.sessions!=0 || row.assisted!=0 {map.insert(((i%campaigns) as u32,base+(i/campaigns) as i32),row);}
+                }
+                map
+            }
+        }
+    }
+}
 fn write_campaigns(dir:PathBuf,rows:CampaignMap,catalog:&Catalog<'_>)->io::Result<usize>{
     make_dir(&dir)?;
     let mut id=StringColumn::new(&dir,"campaign_id",false)?;let mut channel=StringColumn::new(&dir,"channel",false)?;
@@ -378,13 +413,13 @@ fn flush_user(writer:&mut UserWriter,person:&[u8],agg:&UserAgg,category_sums:&[i
     for (i,&revenue) in category_sums.iter().enumerate(){if revenue>best_revenue{best=Some(catalog.categories[i]);best_revenue=revenue;}}
     writer.push(person,agg.day,agg.sessions,agg.events,agg.revenue,best)
 }
-fn process_partition(mut events:Vec<Event<'_>>,mut clicks:Vec<Click<'_>>,catalog:&Catalog<'_>,out:PathBuf)->io::Result<(CampaignMap,u64)> {
+fn process_partition(mut events:Vec<Event<'_>>,mut clicks:Vec<Click<'_>>,catalog:&Catalog<'_>,out:PathBuf,day_min:i32,day_count:usize)->io::Result<(CampaignMap,u64)> {
     events.sort_unstable_by(|a,b|a.hash.cmp(&b.hash).then_with(||a.person.cmp(b.person)).then(a.ts.cmp(&b.ts)));
     clicks.sort_unstable_by(|a,b|a.hash.cmp(&b.hash).then_with(||a.person.cmp(b.person)).then(a.ts.cmp(&b.ts)).then_with(||b.id.cmp(a.id)));
     // All copies have identical values. Sorting puts them together after their
     // unquoted values and canonical people have been compared exactly.
     clicks.dedup_by(|a,b|a.hash==b.hash && a.person==b.person && a.ts==b.ts && a.id==b.id);
-    let mut writer=UserWriter::new(out)?;let mut campaign_rows=CampaignMap::default();
+    let mut writer=UserWriter::new(out)?;let mut campaign_rows=CampaignTotals::new(day_min,day_count,catalog.campaign_values.len());
     let mut ev=0;let mut ck=0;
     let nc=catalog.campaign_values.len();
     let mut active_counts=vec![0u32;nc];let mut positions=vec![usize::MAX;nc];let mut active:Vec<u32>=Vec::new();
@@ -424,13 +459,13 @@ fn process_partition(mut events:Vec<Event<'_>>,mut clicks:Vec<Click<'_>>,catalog
                 }left+=1;
             }
             let credit=if right>left{person_clicks[right-1].campaign}else{catalog.organic};
-            let row=campaign_rows.entry((credit,day)).or_default();row.sessions+=1;row.revenue+=session_revenue;row.purchasing+=i64::from(session_revenue>0);
-            for &campaign in &active{campaign_rows.entry((campaign,day)).or_default().assisted+=1;}
+            let row=campaign_rows.at(credit,day);row.sessions+=1;row.revenue+=session_revenue;row.purchasing+=i64::from(session_revenue>0);
+            for &campaign in &active{campaign_rows.at(campaign,day).assisted+=1;}
         }
         flush_user(&mut writer,person,&agg,&category_sums,catalog)?;
         for &campaign in &active{active_counts[campaign as usize]=0;positions[campaign as usize]=usize::MAX;}active.clear();
     }
-    Ok((campaign_rows,writer.finish()?))
+    Ok((campaign_rows.into_map(),writer.finish()?))
 }
 
 fn run()->io::Result<()> {
@@ -454,10 +489,10 @@ fn run()->io::Result<()> {
     let event_bytes:usize=event_data.iter().map(Vec::len).sum();
     let partitions=(event_bytes/CHUNK).clamp(1,ncpu*4);
     let event_tasks=chunks(&event_data);
-    let raw=parse_events(&event_tasks,ncpu,partitions);
+    let raw=parse_events(&event_tasks,&identity,&catalog,start,end,ncpu,partitions);
     let raw_count:usize=raw.iter().flat_map(|v|v.iter()).map(Vec::len).sum();
     eprintln!("parsed events: {raw_count}, {:.3}s",began.elapsed().as_secs_f64());
-    let events=dedup_events(raw,&identity,&catalog,start,end,ncpu,partitions);
+    let events=dedup_events(raw,ncpu,partitions);
     let event_count:usize=events.iter().flat_map(|v|v.iter()).map(Vec::len).sum();
     eprintln!("validated events: {event_count}, {:.3}s",began.elapsed().as_secs_f64());
     let click_data=load_files(&csv_paths(&data.join("clicks"))?,ncpu)?;let click_tasks=chunks(&click_data);
@@ -472,7 +507,7 @@ fn run()->io::Result<()> {
             loop {
                 let i=next.fetch_add(1,Ordering::Relaxed);let Some(job)=jobs.get(i)else{break;};
                 let (part,e,c)=job.lock().unwrap().take().unwrap();
-                let (rows,count)=process_partition(flatten(e),flatten(c),&catalog,out.join("user_daily").join(format!("part-{part:03}")))?;
+                let (rows,count)=process_partition(flatten(e),flatten(c),&catalog,out.join("user_daily").join(format!("part-{part:03}")),start.div_euclid(DAY) as i32,((end-1).div_euclid(DAY)-start.div_euclid(DAY)+1) as usize)?;
                 total_users+=count;
                 for (key,value) in rows {let r=combined.entry(key).or_default();r.sessions+=value.sessions;r.purchasing+=value.purchasing;r.revenue+=value.revenue;r.assisted+=value.assisted;}
             }Ok((combined,total_users))

@@ -1,0 +1,34 @@
+name: Compare Linux performance
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Build baseline and current images
+        run: |
+          mkdir /tmp/shopping-baseline
+          git archive b012c755514a34b5c4949b9bc315a733bf28e261 | tar -x -C /tmp/shopping-baseline
+          timeout 600 docker build -t shopping-sessions:baseline /tmp/shopping-baseline
+          timeout 600 docker build -t shopping-sessions:optimized .
+      - name: Generate twenty-million-event dataset
+        run: |
+          cargo build --release --locked --offline --manifest-path tests/generator/Cargo.toml
+          tests/generator/target/release/generate --seed 818 --events 20000000 --clicks 5000000 --threads 4 --output /tmp/shopping-data
+      - name: Alternate three runs per image and compare all output rows
+        run: python tests/benchmark.py /tmp/shopping-data benchmark-results --repeats 3
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-benchmark
+          path: benchmark-results/

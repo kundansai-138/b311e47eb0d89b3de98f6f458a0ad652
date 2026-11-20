@@ -54,7 +54,8 @@ def export_parquet(native: Path, output: Path, threads: int) -> None:
                     arrays.append(pa.Array.from_buffers(typ, count, [None, buffer(part / f"{name}.{extension}")]))
             table = pa.Table.from_arrays(arrays, names=list(columns))
             pq.write_table(table, destination / f"part-{i:04d}.parquet",
-                           compression="zstd", compression_level=1, row_group_size=131_072)
+                           compression="none", use_dictionary=False, write_statistics=False,
+                           row_group_size=262_144)
             return count
         if len(parts) == 1:
             rows = convert_part((0, parts[0]))
@@ -76,7 +77,20 @@ def main() -> None:
             raise FileExistsError(f"Use a fresh OUTPUT_DIR: {table} already contains Parquet files")
     threads = max(1, int(os.environ.get("NCPU", "8")))
     executable = os.environ.get("SHOPPING_ENGINE", str(root / "bin" / "shopping-sessions"))
-    subprocess.run([executable], check=True)
+    engine = subprocess.Popen([executable])
+    try:
+        # Import Arrow while the native engine starts; table buffers are opened
+        # only after native memory has been released.
+        import pyarrow  # noqa: F401
+        import pyarrow.parquet  # noqa: F401
+        returncode = engine.wait()
+        if returncode:
+            raise subprocess.CalledProcessError(returncode, [executable])
+    except BaseException:
+        if engine.poll() is None:
+            engine.terminate()
+            engine.wait()
+        raise
     export_parquet(scratch / "native-output", output, threads)
     print(f"pipeline including Parquet: {time.monotonic() - start:.3f}s", file=sys.stderr)
 
