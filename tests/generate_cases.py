@@ -126,6 +126,25 @@ def explicit_cases(base):
         event('a', at=t, ingest=t+DAY), event('b',at=t+999,ingest=t+DAY+1000),
         event('c',at=t+1001,ingest=t+DAY+1000),event('d',at=t,ingest=t-DAY*2),
     ])
+    # A fourteen-day window starting late in the day touches fifteen UTC dates.
+    # The final millisecond belongs to the last date; window_end itself is excluded.
+    partial_start = '2026-10-01T23:30:00Z'
+    partial_begin = timestamp(partial_start)
+    partial_times = [partial_begin, partial_begin+3_600_000,
+                     partial_begin+14*DAY-1, partial_begin+14*DAY]
+    build(base, 'X11_partial_day_window', start=partial_start,
+          events=[event(f'e{i}', at=at, kind='purchase', price='1')
+                  for i, at in enumerate(partial_times)],
+          clicks=[['k0', 'u1', 'c_2', str(partial_begin)]])
+    # Many catalog campaigns and few observed rows catch sparse aggregation paths
+    # and require preserving a campaign that assisted but received no credit.
+    sparse_begin = timestamp('2026-10-01T00:00:00Z')
+    build(base, 'X12_sparse_campaign_catalog',
+          campaigns=[(f'c_{i}', 'channel') for i in range(21_000)],
+          events=[event('e0', at=sparse_begin, kind='purchase', price='25'),
+                  event('e1', at=sparse_begin+DAY)],
+          clicks=[['k0', 'u1', 'c_0', str(sparse_begin-1)],
+                  ['k1', 'u1', 'c_20999', str(sparse_begin)]])
 
 
 def random_cases(base, count):
@@ -176,4 +195,4 @@ if __name__=='__main__':
     args=parser.parse_args()
     explicit_cases(args.output)
     random_cases(args.output,args.random_count)
-    print(f'Wrote 10 explicit and {args.random_count} randomized cases to {args.output}')
+    print(f'Wrote 12 explicit and {args.random_count} randomized cases to {args.output}')

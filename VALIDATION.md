@@ -3,10 +3,10 @@
 ## Correctness
 
 - All 36 supplied fixtures pass with exact row and schema comparison.
-- All 42 additional fixtures pass: ten focused cases and 32 deterministic randomized cases.
+- All 44 additional fixtures pass: twelve focused cases and 32 deterministic randomized cases. This includes partial-day manifests and the dense-to-sparse aggregation fallback.
 - Public dev input regenerated with the supplied generator, seed 1, 1,000,000 events and 250,000 clicks. Both tables exactly match the supplied `dev-answer.zip`: 117,038 user rows and 27,400 campaign rows. DATE types and unique keys checked.
 - Four independent generated datasets, seeds 2, 17, 2028, and 97331, each with 50,000 events and 18,000 clicks, exactly match the independent Python oracle for both tables.
-- Three Rust parser tests pass, covering strict CSV/CR handling, calendars/offsets, and numeric limits.
+- Seven Rust tests pass, covering strict CSV/CR handling, calendars/offsets, numeric limits, forced person-hash collisions, click-ID tie order, and empty inputs.
 - The 20M dataset output is exactly unchanged after parallelizing Parquet export, compared across every row.
 - Both large runs have equal user/campaign session and revenue totals; organic assists are zero; total assists are at least credited non-organic sessions.
 

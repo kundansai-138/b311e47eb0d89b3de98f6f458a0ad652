@@ -4,9 +4,10 @@ COPY Cargo.toml Cargo.lock ./
 COPY src/ ./src/
 # The scorer guarantees Cascade Lake or newer. AVX2/BMI2 are available there.
 ARG TARGETARCH
-RUN if [ "$TARGETARCH" = "amd64" ]; then \
-      RUSTFLAGS="-C target-cpu=x86-64-v3" cargo build --release --locked --offline; \
-    else cargo build --release --locked --offline; fi
+RUN set -eu; \
+    if [ "$TARGETARCH" = "amd64" ]; then export RUSTFLAGS="-C target-cpu=x86-64-v3"; fi; \
+    cargo test --release --locked --offline; \
+    cargo build --release --locked --offline
 
 FROM python:3.12-slim-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 \

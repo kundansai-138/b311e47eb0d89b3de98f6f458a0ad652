@@ -20,12 +20,15 @@ jobs:
           mkdir /tmp/shopping-baseline
           git archive b012c755514a34b5c4949b9bc315a733bf28e261 | tar -x -C /tmp/shopping-baseline
           timeout 600 docker build -t shopping-sessions:baseline /tmp/shopping-baseline
+          mkdir /tmp/shopping-eager
+          git archive 6072e581e54e3bc4d7ec7de1227a988d58cfcd8f | tar -x -C /tmp/shopping-eager
+          timeout 600 docker build -t shopping-sessions:eager /tmp/shopping-eager
           timeout 600 docker build -t shopping-sessions:optimized .
       - name: Generate twenty-million-event dataset
         run: |
           cargo build --release --locked --offline --manifest-path tests/generator/Cargo.toml
           tests/generator/target/release/generate --seed 818 --events 20000000 --clicks 5000000 --threads 4 --output /tmp/shopping-data
-      - name: Alternate three runs per image and compare all output rows
+      - name: Rotate three runs per image and compare all output rows
         run: python tests/benchmark.py /tmp/shopping-data benchmark-results --repeats 3
       - uses: actions/upload-artifact@v4
         if: always()

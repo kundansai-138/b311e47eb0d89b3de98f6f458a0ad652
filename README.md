@@ -57,7 +57,7 @@ On Windows PowerShell, set the same environment variables with `$env:NAME = 'val
 1. Read all link files and resolve connected components with union by size and path compression. Track the bytewise minimum ID separately, including IDs absent from events and clicks.
 2. Parse records once with the exact LF-only CSV dialect and precompute validation while the fields are available. Keep invalid copies as tombstones until global earliest-ingest deduplication; only the winning copy can survive. Hash collisions always compare original bytes.
 3. Validate timestamp calendars, offsets, windows, prices, event types, and lateness. Group surviving records by canonical person.
-4. Parse clicks and sort each person's events/clicks. Build sessions from gaps greater than 30 minutes. The click order selects the latest eligible timestamp and the smallest bytewise click ID at that timestamp.
+4. Parse clicks and sort events/clicks by person hash and timestamp. Verify exact person bytes in every hash bucket, and repair the order of any colliding bucket. Build sessions from gaps greater than 30 minutes. The click order selects the latest eligible timestamp and the smallest bytewise click ID at that timestamp.
 5. Sweep clicks with a rolling seven-day window and per-campaign counts. Each active campaign contributes one assist per session; no session-to-click Cartesian/range join is materialized.
 6. Aggregate campaign days in dense counters when the manifest/catalog dimensions are small, otherwise use sparse counters. Stream binary column buffers to scratch, then release native memory. Export independent Parquet parts concurrently with explicit DATE and nullable category types, without unnecessary dictionaries, compression, or statistics.
 
@@ -70,7 +70,7 @@ Parsed event records occupy 64 bytes, surviving event records 40 bytes, and clic
 - `rules.md`: supplied authoritative rules.
 - `fixtures/`: supplied input cases and expected answers, preserved byte-for-byte.
 - `tests/oracle.py`: independent, deliberately simple Python reference for small inputs.
-- `tests/generate_cases.py`: ten focused adversarial cases plus 32 deterministic randomized cases.
+- `tests/generate_cases.py`: twelve focused adversarial cases plus 32 deterministic randomized cases.
 - `scripts/`: exact output comparison and scorer-style execution.
 - `VALIDATION.md`: measured results and outstanding environment checks.
 
