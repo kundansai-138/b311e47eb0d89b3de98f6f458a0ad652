@@ -4,4 +4,9 @@
 !src/
 !src/**
 !run.sh
+!build.rs
+!native/
+!native/**
+!vendor/
+!vendor/**
 !Dockerfile
