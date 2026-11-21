@@ -21,7 +21,7 @@ def main():
     args.report.mkdir(parents=True, exist_ok=True)
     threads = 8
     quota = min(4, len(os.sched_getaffinity(0)))
-    variants = ["baseline", "packed", "packed-wide", "parser", "identity", "reduce"]
+    variants = ["baseline", "combined", "pgo", "overlap", "overlap4", "partition"]
     records = []
     first_outputs = {}
     with tempfile.TemporaryDirectory(prefix="shopping-benchmark-", ignore_cleanup_errors=True) as temp:
@@ -45,8 +45,8 @@ def main():
                        "-v", f"{output}:/output", "-v", f"{scratch}:/scratch",
                        "-e", "DATA_DIR=/data", "-e", "OUTPUT_DIR=/output", "-e", "SCRATCH_DIR=/scratch",
                        "-e", "HOME=/scratch", "-e", f"NCPU={threads}", "-e", "MEM_GB=12",
-                       "-e", "ROUND3_PACKED=" + ("0" if variant == "packed-wide" else "1"),
-                       f"shopping-sessions:{'packed' if variant == 'packed-wide' else variant}"]
+                       "-e", "ROUND3_CLICK_THREADS=4", "-e", "ROUND3_DEDUP_THREADS=" + ("4" if variant == "overlap4" else "8"),
+                       f"shopping-sessions:{'overlap' if variant == 'overlap4' else variant}"]
                 log = args.report / f"{variant}-{repetition}.log"
                 try:
                     with log.open("w") as handle:

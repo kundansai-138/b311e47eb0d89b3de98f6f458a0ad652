@@ -1,4 +1,4 @@
-name: Compare third-round isolated candidates
+name: Compare combined engine and compiler candidates
 on:
   workflow_dispatch:
 permissions:
@@ -6,30 +6,37 @@ permissions:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
-      - name: Build baseline and isolated candidates
+      - name: Build baseline and combined candidates
         run: |
           timeout 600 docker build -t shopping-sessions:baseline .
-          for variant in packed parser identity reduce; do
+          for variant in combined overlap partition; do
             timeout 600 docker build -t shopping-sessions:$variant .bench/$variant
           done
+      - name: Build profile guided candidate within competition limit
+        run: |
+          mkdir -p benchmark-results
+          start=$(date +%s)
+          timeout 600 docker build --progress=plain --target pgo -t shopping-sessions:pgo .bench/pgo-combined
+          echo "PGO build seconds: $(($(date +%s)-start))" | tee benchmark-results/pgo-build-time.txt
+          docker build --target pgo-artifacts --output type=local,dest=/tmp/pgo-artifacts .bench/pgo-combined
+          cp /tmp/pgo-artifacts/build-info.txt /tmp/pgo-artifacts/profile-summary.txt /tmp/pgo-artifacts/source-sha256.txt benchmark-results/
       - name: Generate official twenty-million-event input
         run: |
           cargo build --release --locked --offline --manifest-path tests/generator/Cargo.toml
           tests/generator/target/release/generate --seed 818 --events 20000000 --clicks 5000000 --threads 4 --output /tmp/shopping-data
       - name: Rotate three runs and compare every output row
         run: |
-          mkdir benchmark-results
           lscpu > benchmark-results/cpu.txt
           python tests/benchmark.py /tmp/shopping-data benchmark-results --repeats 3
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: round3-linux-candidates
+          name: round3-linux-combined
           path: benchmark-results/
