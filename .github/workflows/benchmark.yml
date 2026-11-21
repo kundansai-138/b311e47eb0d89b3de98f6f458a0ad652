@@ -9,6 +9,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -32,6 +34,24 @@ jobs:
           mkdir benchmark-results
           lscpu > benchmark-results/cpu.txt
           python tests/benchmark.py /tmp/shopping-data benchmark-results --repeats 5
+      - name: Collect symbolized CPU samples
+        continue-on-error: true
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y linux-tools-generic
+          sudo sysctl kernel.perf_event_paranoid=-1
+          perf=$(find -L /usr/lib -name perf -type f -print -quit)
+          test -n "$perf"
+          "$perf" version
+          id=$(docker create shopping-sessions:baseline)
+          docker cp "$id:/app/shopping-sessions" /tmp/shopping-sessions
+          docker rm "$id"
+          chmod +x /tmp/shopping-sessions
+          mkdir /tmp/profile-output /tmp/profile-scratch
+          export DATA_DIR=/tmp/shopping-data OUTPUT_DIR=/tmp/profile-output SCRATCH_DIR=/tmp/profile-scratch NCPU=8 MEM_GB=12
+          "$perf" record -e cpu-clock -F 999 -o /tmp/perf.data --call-graph dwarf,4096 -- /tmp/shopping-sessions 2> benchmark-results/profile-runtime.log
+          "$perf" report -i /tmp/perf.data --stdio --no-children --percent-limit 0.3 > benchmark-results/profile-report.txt
+          "$perf" report -i /tmp/perf.data --stdio --no-children --sort symbol --percent-limit 0.3 > benchmark-results/profile-symbols.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
