@@ -372,9 +372,390 @@ struct Identity<'a> {
     // Inline strings use exact integer keys, not hashes. The byte-keyed map
     // contains only names the inline codec cannot represent.
     ids: Map<&'a [u8], u64>,
-    inline_ids: Map<u64, u64>,
+    inline_ids: InlineIds,
     names: Vec<&'a [u8]>,
 }
+const INLINE_SHARD_BITS: u32 = 6;
+/// One open-addressing shard of exact inline keys. Inline keys are never zero
+/// (every encoding carries a length sentinel bit), so zero marks an empty slot.
+/// Equality is decided by the full 64-bit key, never by a hash.
+#[derive(Clone, Debug)]
+struct InlineShard {
+    slots: Vec<(u64, u64)>,
+    len: usize,
+}
+impl InlineShard {
+    fn with_capacity(capacity: usize) -> Self {
+        let slots = capacity
+            .saturating_mul(2)
+            .max(16)
+            .checked_next_power_of_two()
+            .expect("inline shard capacity");
+        Self {
+            slots: vec![(0, 0); slots],
+            len: 0,
+        }
+    }
+    #[inline]
+    fn home(key: u64, mask: usize) -> usize {
+        // Independent of the shard selector, which uses the product's top bits.
+        let mut h = key ^ (key >> 33);
+        h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
+        (h ^ (h >> 29)) as usize & mask
+    }
+    #[inline]
+    fn get(&self, key: u64) -> Option<&u64> {
+        debug_assert_ne!(key, 0);
+        let mask = self.slots.len() - 1;
+        let mut i = Self::home(key, mask);
+        loop {
+            let slot = &self.slots[i];
+            if slot.0 == key {
+                return Some(&slot.1);
+            }
+            if slot.0 == 0 {
+                return None;
+            }
+            i = (i + 1) & mask;
+        }
+    }
+    #[inline]
+    fn prefetch(&self, key: u64) {
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            use std::arch::x86_64::{_mm_prefetch, _MM_HINT_T0};
+            let i = Self::home(key, self.slots.len() - 1);
+            _mm_prefetch::<_MM_HINT_T0>(self.slots.as_ptr().add(i).cast());
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        let _ = key;
+    }
+    fn grow(&mut self) {
+        let size = self.slots.len().checked_mul(2).expect("inline shard size");
+        let old = std::mem::replace(&mut self.slots, vec![(0, 0); size]);
+        let mask = self.slots.len() - 1;
+        for (key, value) in old {
+            if key != 0 {
+                let mut i = Self::home(key, mask);
+                while self.slots[i].0 != 0 {
+                    i = (i + 1) & mask;
+                }
+                self.slots[i] = (key, value);
+            }
+        }
+    }
+    /// Inserts a new key, or returns the existing value unchanged.
+    #[inline]
+    fn get_or_insert(&mut self, key: u64, value: u64) -> Option<u64> {
+        assert_ne!(key, 0, "inline keys are never zero");
+        if (self.len + 1) * 2 > self.slots.len() {
+            self.grow();
+        }
+        let mask = self.slots.len() - 1;
+        let mut i = Self::home(key, mask);
+        loop {
+            let slot = &mut self.slots[i];
+            if slot.0 == key {
+                return Some(slot.1);
+            }
+            if slot.0 == 0 {
+                *slot = (key, value);
+                self.len += 1;
+                return None;
+            }
+            i = (i + 1) & mask;
+        }
+    }
+    fn iter(&self) -> impl Iterator<Item = (u64, u64)> + '_ {
+        self.slots.iter().copied().filter(|slot| slot.0 != 0)
+    }
+    fn values_mut(&mut self) -> impl Iterator<Item = &mut u64> {
+        self.slots
+            .iter_mut()
+            .filter(|slot| slot.0 != 0)
+            .map(|slot| &mut slot.1)
+    }
+}
+
+/// Exact inline-key dictionary split by key bits, so disjoint shards can be
+/// built by separate threads and lookups can be prefetched.
+#[derive(Debug)]
+struct InlineIds {
+    shards: Vec<InlineShard>,
+}
+impl Default for InlineIds {
+    fn default() -> Self {
+        Self::with_capacity(0)
+    }
+}
+impl PartialEq for InlineIds {
+    fn eq(&self, other: &Self) -> bool {
+        self.len() == other.len() && self.iter().all(|(k, v)| other.get(&k) == Some(&v))
+    }
+}
+impl InlineIds {
+    fn with_capacity(capacity: usize) -> Self {
+        let count = 1usize << INLINE_SHARD_BITS;
+        Self {
+            shards: (0..count)
+                .map(|_| InlineShard::with_capacity(capacity / count))
+                .collect(),
+        }
+    }
+    #[inline]
+    fn shard_of(key: u64) -> usize {
+        (key.wrapping_mul(0x9e37_79b9_7f4a_7c15) >> (64 - INLINE_SHARD_BITS)) as usize
+    }
+    #[inline]
+    fn get(&self, key: &u64) -> Option<&u64> {
+        self.shards[Self::shard_of(*key)].get(*key)
+    }
+    #[inline]
+    fn prefetch(&self, key: u64) {
+        self.shards[Self::shard_of(key)].prefetch(key);
+    }
+    #[inline]
+    fn get_or_insert(&mut self, key: u64, value: u64) -> Option<u64> {
+        self.shards[Self::shard_of(key)].get_or_insert(key, value)
+    }
+    #[cfg(test)]
+    fn insert(&mut self, key: u64, value: u64) {
+        let shard = &mut self.shards[Self::shard_of(key)];
+        if shard.get_or_insert(key, value).is_some() {
+            let mask = shard.slots.len() - 1;
+            let mut i = InlineShard::home(key, mask);
+            while shard.slots[i].0 != key {
+                i = (i + 1) & mask;
+            }
+            shard.slots[i].1 = value;
+        }
+    }
+    fn len(&self) -> usize {
+        self.shards.iter().map(|shard| shard.len).sum()
+    }
+    fn iter(&self) -> impl Iterator<Item = (u64, u64)> + '_ {
+        self.shards.iter().flat_map(InlineShard::iter)
+    }
+    fn values_mut(&mut self) -> impl Iterator<Item = &mut u64> {
+        self.shards.iter_mut().flat_map(|shard| shard.values_mut())
+    }
+}
+
+/// Splits link files into small newline-aligned tasks for parallel parsing.
+fn small_chunks(files: &[InputFile], size: usize) -> Vec<&[u8]> {
+    let mut result = Vec::new();
+    for file in files {
+        let mut rest = body(file);
+        while !rest.is_empty() {
+            let mut end = rest.len().min(size);
+            if end < rest.len() {
+                end = rest[end..]
+                    .iter()
+                    .position(|&b| b == b'\n')
+                    .map_or(rest.len(), |p| end + p + 1);
+            }
+            result.push(&rest[..end]);
+            rest = &rest[end..];
+        }
+    }
+    result
+}
+
+/// Parallel link graph for datasets whose linked IDs are all inline-encodable.
+/// Returns None if any ID needs the byte-keyed dictionary; the exact serial
+/// builder then handles the whole input. Produces the same canonical keys as
+/// `identities_phased`: every linked key maps to the inline key of its
+/// person's byte-wise smallest ID.
+fn identities_parallel(files: &[InputFile], ncpu: usize) -> Option<Identity<'static>> {
+    let shard_count = 1usize << INLINE_SHARD_BITS;
+    let tasks = small_chunks(files, 256 * 1024);
+    let workers = ncpu.clamp(1, tasks.len().max(1));
+    let next = AtomicUsize::new(0);
+    // Phase 1: parse rows into key edges, scattering endpoint keys by shard.
+    type Parsed = Option<(Vec<(u64, u64)>, Vec<Vec<u64>>)>;
+    let parsed: Vec<Parsed> = thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut edges = Vec::new();
+                    let mut buckets: Vec<Vec<u64>> =
+                        (0..shard_count).map(|_| Vec::new()).collect();
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(bytes) = tasks.get(i) else {
+                            break;
+                        };
+                        for [a, b] in rows::<2>(bytes) {
+                            if a.is_empty() || b.is_empty() {
+                                continue;
+                            }
+                            let ka = inline_person::encode(a)?;
+                            let kb = inline_person::encode(b)?;
+                            buckets[InlineIds::shard_of(ka)].push(ka);
+                            buckets[InlineIds::shard_of(kb)].push(kb);
+                            edges.push((ka, kb));
+                        }
+                    }
+                    Some((edges, buckets))
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    let mut edge_sets = Vec::with_capacity(parsed.len());
+    let mut bucket_sets = Vec::with_capacity(parsed.len());
+    for worker in parsed {
+        let (edges, buckets) = worker?;
+        edge_sets.push(edges);
+        bucket_sets.push(buckets);
+    }
+    // Phase 2: each shard assigns dense local indices to its distinct keys.
+    let next = AtomicUsize::new(0);
+    type ShardJob = Mutex<Option<(InlineShard, Vec<u64>)>>;
+    let shard_jobs: Vec<ShardJob> = (0..shard_count).map(|_| Mutex::new(None)).collect();
+    thread::scope(|scope| {
+        for _ in 0..ncpu.clamp(1, shard_count) {
+            scope.spawn(|| loop {
+                let shard = next.fetch_add(1, Ordering::Relaxed);
+                if shard >= shard_count {
+                    break;
+                }
+                let total: usize = bucket_sets.iter().map(|b| b[shard].len()).sum();
+                // Endpoints repeat across edges; size for a third of them as
+                // distinct keys. The shard still grows if more turn out distinct.
+                let mut map = InlineShard::with_capacity(total / 3 + 16);
+                let mut keys = Vec::with_capacity(total / 3 + 16);
+                for buckets in &bucket_sets {
+                    for &key in &buckets[shard] {
+                        if map.get_or_insert(key, keys.len() as u64).is_none() {
+                            keys.push(key);
+                        }
+                    }
+                }
+                *shard_jobs[shard].lock().unwrap() = Some((map, keys));
+            });
+        }
+    });
+    drop(bucket_sets);
+    let mut shards = Vec::with_capacity(shard_count);
+    let mut offsets = Vec::with_capacity(shard_count);
+    let mut keys: Vec<u64> = Vec::new();
+    for job in shard_jobs {
+        let (map, shard_keys) = job.into_inner().unwrap().unwrap();
+        offsets.push(keys.len() as u64);
+        keys.extend_from_slice(&shard_keys);
+        shards.push(map);
+    }
+    if keys.len() >= u32::MAX as usize {
+        return None;
+    }
+    // Phase 3: translate edges to dense node indices in parallel.
+    let dense: Vec<Vec<(u32, u32)>> = {
+        let shards = &shards;
+        let offsets = &offsets;
+        let index_of = move |key: u64| -> u32 {
+            let shard = InlineIds::shard_of(key);
+            (offsets[shard] + *shards[shard].get(key).unwrap()) as u32
+        };
+        thread::scope(|scope| {
+            let handles: Vec<_> = edge_sets
+                .iter()
+                .map(|edges| {
+                    scope.spawn(move || {
+                        edges
+                            .iter()
+                            .map(|&(a, b)| (index_of(a), index_of(b)))
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        })
+    };
+    drop(edge_sets);
+    // Phase 4: union by size, tracking each set's byte-wise smallest ID.
+    let byte_less = |a: u64, b: u64| -> bool {
+        let mut x = [0u8; 9];
+        let mut y = [0u8; 9];
+        inline_person::decode(a, &mut x) < inline_person::decode(b, &mut y)
+    };
+    #[derive(Clone, Copy)]
+    struct KeyNode {
+        parent: u32,
+        size: u32,
+        minimum: u64,
+    }
+    let mut nodes: Vec<KeyNode> = keys
+        .iter()
+        .enumerate()
+        .map(|(i, &key)| KeyNode {
+            parent: i as u32,
+            size: 1,
+            minimum: key,
+        })
+        .collect();
+    drop(keys);
+    #[inline]
+    fn key_root(nodes: &mut [KeyNode], mut index: u32) -> u32 {
+        while nodes[index as usize].parent != index {
+            let parent = nodes[index as usize].parent;
+            let grandparent = nodes[parent as usize].parent;
+            nodes[index as usize].parent = grandparent;
+            index = grandparent;
+        }
+        index
+    }
+    for edges in &dense {
+        for &(ia, ib) in edges {
+            let mut ra = key_root(&mut nodes, ia) as usize;
+            let mut rb = key_root(&mut nodes, ib) as usize;
+            if ra != rb {
+                if nodes[ra].size < nodes[rb].size {
+                    std::mem::swap(&mut ra, &mut rb);
+                }
+                nodes[rb].parent = ra as u32;
+                nodes[ra].size += nodes[rb].size;
+                if byte_less(nodes[rb].minimum, nodes[ra].minimum) {
+                    nodes[ra].minimum = nodes[rb].minimum;
+                }
+            }
+        }
+    }
+    drop(dense);
+    let canonical: Vec<u64> = (0..nodes.len() as u32)
+        .map(|i| {
+            let root = key_root(&mut nodes, i) as usize;
+            nodes[root].minimum
+        })
+        .collect();
+    drop(nodes);
+    // Phase 5: rewrite every shard's dense index to its canonical person.
+    {
+        let jobs: Vec<Mutex<Option<&mut InlineShard>>> =
+            shards.iter_mut().map(|m| Mutex::new(Some(m))).collect();
+        let next = AtomicUsize::new(0);
+        thread::scope(|scope| {
+            for _ in 0..ncpu.clamp(1, shard_count) {
+                scope.spawn(|| loop {
+                    let shard = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(job) = jobs.get(shard) else {
+                        break;
+                    };
+                    let map = job.lock().unwrap().take().unwrap();
+                    for value in map.values_mut() {
+                        *value = canonical[(offsets[shard] + *value) as usize];
+                    }
+                });
+            }
+        });
+    }
+    Some(Identity {
+        ids: Map::default(),
+        inline_ids: InlineIds { shards },
+        names: Vec::new(),
+    })
+}
+
 fn root(parents: &mut [usize], mut i: usize) -> usize {
     while parents[i] != i {
         parents[i] = parents[parents[i]];
@@ -398,8 +779,8 @@ fn compact_root(nodes: &mut [IdentityNode], mut index: u32) -> u32 {
     }
     index
 }
-fn identities(files: &[InputFile]) -> Identity<'_> {
-    identities_phased(files)
+fn identities(files: &[InputFile], ncpu: usize) -> Identity<'_> {
+    identities_parallel(files, ncpu).unwrap_or_else(|| identities_phased(files))
 }
 
 fn identities_phased(files: &[InputFile]) -> Identity<'_> {
@@ -415,7 +796,7 @@ fn identities_phased(files: &[InputFile]) -> Identity<'_> {
         })
         .sum::<usize>();
     let mut ids = Map::default();
-    let mut inline_ids = Map::with_capacity_and_hasher(reserve, Default::default());
+    let mut inline_ids = InlineIds::with_capacity(reserve);
     let mut names = Vec::with_capacity(reserve);
     let bound = reserve.saturating_add(files.len().saturating_mul(2));
     if bound > u32::MAX as usize {
@@ -431,12 +812,11 @@ fn identities_phased(files: &[InputFile]) -> Identity<'_> {
             let mut add = |name| {
                 let index = names.len();
                 match inline_person::encode(name) {
-                    Some(key) => match inline_ids.entry(key) {
-                        Entry::Occupied(entry) => return usize::try_from(*entry.get()).unwrap(),
-                        Entry::Vacant(entry) => {
-                            entry.insert(checked_index(index));
+                    Some(key) => {
+                        if let Some(existing) = inline_ids.get_or_insert(key, checked_index(index)) {
+                            return usize::try_from(existing).unwrap();
                         }
-                    },
+                    }
                     None => match ids.entry(name) {
                         Entry::Occupied(entry) => return usize::try_from(*entry.get()).unwrap(),
                         Entry::Vacant(entry) => {
@@ -508,7 +888,7 @@ fn identities_wide(files: &[InputFile]) -> Identity<'_> {
         })
         .sum::<usize>();
     let mut ids = Map::default();
-    let mut inline_ids = Map::with_capacity_and_hasher(reserve, Default::default());
+    let mut inline_ids = InlineIds::with_capacity(reserve);
     let mut names = Vec::with_capacity(reserve);
     let mut parents = Vec::with_capacity(reserve);
     let mut sizes = Vec::with_capacity(reserve);
@@ -521,12 +901,11 @@ fn identities_wide(files: &[InputFile]) -> Identity<'_> {
             let mut add = |name| {
                 let index = names.len();
                 match inline_person::encode(name) {
-                    Some(key) => match inline_ids.entry(key) {
-                        Entry::Occupied(entry) => return usize::try_from(*entry.get()).unwrap(),
-                        Entry::Vacant(entry) => {
-                            entry.insert(checked_index(index));
+                    Some(key) => {
+                        if let Some(existing) = inline_ids.get_or_insert(key, checked_index(index)) {
+                            return usize::try_from(existing).unwrap();
                         }
-                    },
+                    }
                     None => match ids.entry(name) {
                         Entry::Occupied(entry) => return usize::try_from(*entry.get()).unwrap(),
                         Entry::Vacant(entry) => {
@@ -614,9 +993,10 @@ impl<'a> LocalPeople<'a> {
         }
     }
     #[inline]
-    fn intern(&mut self, name: &'a [u8], identity: &Identity<'a>) -> u64 {
-        if let Some(id) = identity.lookup(name) {
-            return id;
+    fn intern(&mut self, name: &'a [u8]) -> u64 {
+        if let Some(key) = inline_person::encode(name) {
+            // Resolved against the link graph after parsing.
+            return key;
         }
         if let Some(&id) = self.ids.get(name) {
             return id;
@@ -643,6 +1023,9 @@ fn merge_people<'a>(identity: &mut Identity<'a>, workers: Vec<Vec<&'a [u8]>>) ->
                 .into_iter()
                 .map(|name| match unknown.entry(name) {
                     Entry::Occupied(entry) => *entry.get(),
+                    Entry::Vacant(entry) if identity.ids.contains_key(name) => {
+                        *entry.insert(identity.ids[name])
+                    }
                     Entry::Vacant(entry) => {
                         let id = named_person(identity.names.len());
                         identity.names.push(name);
@@ -655,10 +1038,7 @@ fn merge_people<'a>(identity: &mut Identity<'a>, workers: Vec<Vec<&'a [u8]>>) ->
         .collect();
     identity.ids.reserve(unknown.len());
     for (name, id) in unknown {
-        assert!(
-            identity.ids.insert(name, id).is_none(),
-            "unknown was already linked"
-        );
+        identity.ids.entry(name).or_insert(id);
     }
     remaps
 }
@@ -671,6 +1051,55 @@ fn resolve_person(person: u64, remaps: &[Vec<u64>], worker_bits: u32) -> u64 {
     let worker = payload & ((1 << worker_bits) - 1);
     let local = payload >> worker_bits;
     remaps[usize::try_from(worker).unwrap()][usize::try_from(local).unwrap()]
+}
+/// Maps a parsed person token to its canonical person. Event rows are parsed
+/// before the link graph is complete, so they carry raw inline keys and
+/// worker-local fallback tokens; canonical people are resolved at dedup time.
+trait PersonResolver: Sync {
+    fn resolve(&self, person: u64, worker_bits: u32) -> u64;
+    /// A hint only: starts loading whatever `resolve` will read for `person`.
+    #[inline]
+    fn prefetch(&self, _person: u64) {}
+}
+impl PersonResolver for [Vec<u64>] {
+    #[inline]
+    fn resolve(&self, person: u64, worker_bits: u32) -> u64 {
+        resolve_person(person, self, worker_bits)
+    }
+}
+impl<const N: usize> PersonResolver for [Vec<u64>; N] {
+    #[inline]
+    fn resolve(&self, person: u64, worker_bits: u32) -> u64 {
+        resolve_person(person, self, worker_bits)
+    }
+}
+impl PersonResolver for Vec<Vec<u64>> {
+    #[inline]
+    fn resolve(&self, person: u64, worker_bits: u32) -> u64 {
+        resolve_person(person, self, worker_bits)
+    }
+}
+struct PersonRemaps<'r> {
+    locals: Vec<Vec<u64>>,
+    inline: &'r InlineIds,
+}
+impl PersonResolver for PersonRemaps<'_> {
+    #[inline]
+    fn resolve(&self, person: u64, worker_bits: u32) -> u64 {
+        match person & PERSON_TAG {
+            LOCAL_PERSON => resolve_person(person, &self.locals, worker_bits),
+            NAMED_PERSON => person,
+            // Inline keys never use the tagged nibbles (see inline_keys_and_fallback_tags_never_alias).
+            // An inline name absent from every link is its own person.
+            _ => self.inline.get(&person).copied().unwrap_or(person),
+        }
+    }
+    #[inline]
+    fn prefetch(&self, person: u64) {
+        if !matches!(person & PERSON_TAG, LOCAL_PERSON | NAMED_PERSON | INVALID_PERSON) {
+            self.inline.prefetch(person);
+        }
+    }
 }
 struct Catalog<'a> {
     products: ExactNames<'a>,
@@ -793,7 +1222,6 @@ fn flatten<T>(parts: Vec<Vec<T>>) -> Vec<T> {
 }
 fn parse_events<'a, L: RecordLayout>(
     tasks: &[&'a [u8]],
-    identity: &Identity<'a>,
     catalog: &Catalog<'a>,
     start: i64,
     end: i64,
@@ -836,7 +1264,7 @@ fn parse_events<'a, L: RecordLayout>(
                                 Some((name, ts, revenue, category)) => {
                                     let (ts, revenue, category) =
                                         L::encode(ts, revenue, category, start);
-                                    (people.intern(name, identity), ts, revenue, category)
+                                    (people.intern(name), ts, revenue, category)
                                 }
                                 None => (
                                     INVALID_PERSON,
@@ -887,14 +1315,14 @@ fn raw_id<L: RecordLayout>(raw: Raw<L>, event_id_remaps: &EventIdRemaps) -> u64 
 #[inline]
 fn accepted<L: RecordLayout>(
     raw: Raw<L>,
-    remaps: &[Vec<u64>],
+    remaps: &(impl PersonResolver + ?Sized),
     worker_bits: u32,
 ) -> Option<Event<L>> {
     if raw.person == INVALID_PERSON {
         return None;
     }
     Some(Event::<L> {
-        person: resolve_person(raw.person, remaps, worker_bits),
+        person: remaps.resolve(raw.person, worker_bits),
         ts: raw.ts,
         revenue: raw.revenue,
         category: raw.category,
@@ -940,7 +1368,7 @@ fn validate_fields<'a>(
 fn dedup_events_baseline<L: RecordLayout>(
     inputs: Vec<Vec<Vec<Raw<L>>>>,
     event_id_remaps: &EventIdRemaps,
-    remaps: &[Vec<u64>],
+    remaps: &(impl PersonResolver + ?Sized),
     worker_bits: u32,
     ncpu: usize,
     partitions: usize,
@@ -1023,7 +1451,7 @@ fn dedup_slot_capacity(records: usize) -> Option<usize> {
 #[inline]
 fn emit_dedup_row<L: RecordLayout>(
     row: Raw<L>,
-    remaps: &[Vec<u64>],
+    remaps: &(impl PersonResolver + ?Sized),
     worker_bits: u32,
     output: &mut [Vec<Event<L>>],
 ) {
@@ -1037,7 +1465,7 @@ fn emit_dedup_row<L: RecordLayout>(
 fn dedup_rows_sorted<L: RecordLayout>(
     rows: &mut [Raw<L>],
     event_id_remaps: &EventIdRemaps,
-    remaps: &[Vec<u64>],
+    remaps: &(impl PersonResolver + ?Sized),
     worker_bits: u32,
     output: &mut [Vec<Event<L>>],
 ) {
@@ -1091,7 +1519,7 @@ fn dedup_rows_sorted<L: RecordLayout>(
 fn dedup_rows_slots<const LINEAR_OUTPUT: bool, L: RecordLayout>(
     rows: &[Raw<L>],
     event_id_remaps: &EventIdRemaps,
-    remaps: &[Vec<u64>],
+    remaps: &(impl PersonResolver + ?Sized),
     worker_bits: u32,
     output: &mut [Vec<Event<L>>],
 ) -> bool {
@@ -1211,7 +1639,7 @@ impl ChunkRefLayout {
 fn dedup_chunks<L: RecordLayout>(
     chunks: &[Vec<Raw<L>>],
     event_id_remaps: &EventIdRemaps,
-    remaps: &[Vec<u64>],
+    remaps: &(impl PersonResolver + ?Sized),
     worker_bits: u32,
     output: &mut [Vec<Event<L>>],
 ) -> bool {
@@ -1255,8 +1683,12 @@ fn dedup_chunks<L: RecordLayout>(
             }
         }
     }
+    const LOOKAHEAD: usize = 16;
     for (rows, flags) in chunks.iter().zip(&winners) {
-        for (&row, &winner) in rows.iter().zip(flags) {
+        for (index, (&row, &winner)) in rows.iter().zip(flags).enumerate() {
+            if let Some(ahead) = rows.get(index + LOOKAHEAD) {
+                remaps.prefetch(ahead.person);
+            }
             if winner != 0 {
                 emit_dedup_row(row, remaps, worker_bits, output);
             }
@@ -1269,7 +1701,7 @@ fn dedup_chunks<L: RecordLayout>(
 fn dedup_chunks_slot_reference<const LINEAR_OUTPUT: bool, L: RecordLayout>(
     chunks: &[Vec<Raw<L>>],
     event_id_remaps: &EventIdRemaps,
-    remaps: &[Vec<u64>],
+    remaps: &(impl PersonResolver + ?Sized),
     worker_bits: u32,
     output: &mut [Vec<Event<L>>],
 ) -> bool {
@@ -1344,7 +1776,7 @@ fn dedup_chunks_slot_reference<const LINEAR_OUTPUT: bool, L: RecordLayout>(
 fn dedup_chunks_slots<const LINEAR_OUTPUT: bool, L: RecordLayout>(
     chunks: &[Vec<Raw<L>>],
     event_id_remaps: &EventIdRemaps,
-    remaps: &[Vec<u64>],
+    remaps: &(impl PersonResolver + ?Sized),
     worker_bits: u32,
     output: &mut [Vec<Event<L>>],
 ) -> bool {
@@ -1364,7 +1796,7 @@ fn dedup_chunks_slots<const LINEAR_OUTPUT: bool, L: RecordLayout>(
 fn dedup_events<L: RecordLayout>(
     inputs: Vec<Vec<Vec<Raw<L>>>>,
     event_id_remaps: &EventIdRemaps,
-    remaps: &[Vec<u64>],
+    remaps: &(impl PersonResolver + ?Sized),
     worker_bits: u32,
     ncpu: usize,
     partitions: usize,
@@ -1598,7 +2030,45 @@ fn sort_events<L: RecordLayout>(events: &mut [Event<L>]) {
     }
     events.sort_unstable_by(|a, b| a.person.cmp(&b.person).then(a.ts.cmp(&b.ts)));
 }
-fn sort_clicks<L: RecordLayout>(clicks: &mut [Click<'_, L>]) {
+fn sort_clicks<L: RecordLayout>(clicks: &mut Vec<Click<'_, L>>) {
+    if L::PACKED_SORT_KEY && clicks.len() > 1 && u32::try_from(clicks.len()).is_ok() {
+        // Sort 16-byte (person, time, index) keys with the vectorized sorter,
+        // then gather. Indices make every key distinct; only clicks sharing a
+        // person and time need their IDs compared, which is done exactly below.
+        let mut keys: Vec<[u64; 2]> = clicks
+            .iter()
+            .enumerate()
+            .map(|(index, click)| {
+                let ts = u64::try_from(L::gap(click.ts, L::Time::default()))
+                    .expect("packed click time is an unsigned 32-bit offset");
+                debug_assert!(ts <= u64::from(u32::MAX));
+                [(ts << 32) | index as u64, click.person]
+            })
+            .collect();
+        if unsafe { simd_sort::try_sort_records(keys.as_mut_ptr().cast(), keys.len()) } {
+            let sorted: Vec<Click<'_, L>> = keys
+                .iter()
+                .map(|key| clicks[(key[0] as u32) as usize])
+                .collect();
+            drop(keys);
+            *clicks = sorted;
+            let mut first = 0;
+            while first < clicks.len() {
+                let mut end = first + 1;
+                while end < clicks.len()
+                    && clicks[end].person == clicks[first].person
+                    && clicks[end].ts == clicks[first].ts
+                {
+                    end += 1;
+                }
+                if end - first > 1 {
+                    clicks[first..end].sort_unstable_by(|a, b| b.id.cmp(a.id));
+                }
+                first = end;
+            }
+            return;
+        }
+    }
     clicks.sort_unstable_by(|a, b| {
         a.person
             .cmp(&b.person)
@@ -1771,13 +2241,7 @@ fn run() -> io::Result<()> {
     let link_data = load_files(&csv_paths(&data.join("links"))?, ncpu)?;
     let product_data = fs::read(data.join("products.csv"))?;
     let campaign_data = fs::read(data.join("campaigns.csv"))?;
-    let identity = identities(&link_data);
     let catalog = catalog(&product_data, &campaign_data);
-    eprintln!(
-        "identities: {} IDs, {:.3}s",
-        identity.names.len(),
-        began.elapsed().as_secs_f64()
-    );
     let packed = start
         .checked_sub(WEEK)
         .is_some_and(|base| can_pack(base, end, catalog.categories.len()));
@@ -1791,9 +2255,9 @@ fn run() -> io::Result<()> {
         }
     );
     if packed {
-        process_inputs::<Packed>(&data, &out, ncpu, start, end, began, identity, &catalog)
+        process_inputs::<Packed>(&data, &out, ncpu, start, end, began, &link_data, &catalog)
     } else {
-        process_inputs::<Wide>(&data, &out, ncpu, start, end, began, identity, &catalog)
+        process_inputs::<Wide>(&data, &out, ncpu, start, end, began, &link_data, &catalog)
     }
 }
 
@@ -1804,15 +2268,29 @@ fn process_inputs<L: RecordLayout>(
     start: i64,
     end: i64,
     began: Instant,
-    identity: Identity<'_>,
+    link_data: &[InputFile],
+    catalog: &Catalog<'_>,
+) -> io::Result<()> {
+    // The link graph is built on its own thread while events are mapped and
+    // parsed: parsed rows carry raw person tokens resolved during dedup.
+    thread::scope(|scope| {
+        let linking = scope.spawn(|| identities(link_data, ncpu));
+        process_with_links::<L>(data, out, ncpu, start, end, began, linking, catalog)
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn process_with_links<'l, L: RecordLayout>(
+    data: &Path,
+    out: &Path,
+    ncpu: usize,
+    start: i64,
+    end: i64,
+    began: Instant,
+    linking: thread::ScopedJoinHandle<'_, Identity<'l>>,
     catalog: &Catalog<'_>,
 ) -> io::Result<()> {
     let event_data = load_files(&csv_paths(&data.join("events"))?, ncpu)?;
-    let mut identity = Identity {
-        ids: identity.ids,
-        inline_ids: identity.inline_ids,
-        names: identity.names,
-    };
     // Tiny fixtures need one part, not dozens of empty files. Full datasets
     // retain sixteen independent partitions per CPU for balanced work queues.
     let event_bytes: usize = event_data.iter().map(|f| f.len()).sum();
@@ -1820,7 +2298,6 @@ fn process_inputs<L: RecordLayout>(
     let event_tasks = chunks(&event_data);
     let parsed = parse_events::<L>(
         &event_tasks,
-        &identity,
         &catalog,
         start,
         end,
@@ -1832,10 +2309,21 @@ fn process_inputs<L: RecordLayout>(
         "parsed events: {raw_count}, {:.3}s",
         began.elapsed().as_secs_f64()
     );
+    let linked = linking.join().unwrap();
+    eprintln!(
+        "identities: {} IDs, {:.3}s",
+        linked.names.len(),
+        began.elapsed().as_secs_f64()
+    );
+    let mut identity = Identity {
+        ids: linked.ids,
+        inline_ids: linked.inline_ids,
+        names: linked.names,
+    };
     let unknown_count: usize = parsed.unknown.iter().map(Vec::len).sum();
     let before_people = identity.names.len();
     let merge_start = Instant::now();
-    let remaps = merge_people(&mut identity, parsed.unknown);
+    let locals = merge_people(&mut identity, parsed.unknown);
     eprintln!("interned people: local_unknown={unknown_count}, unique_unknown={}, merge={:.3}s, total={:.3}s",
         identity.names.len() - before_people, merge_start.elapsed().as_secs_f64(), began.elapsed().as_secs_f64());
     let fallback_count: usize = parsed.fallback_events.iter().map(Vec::len).sum();
@@ -1844,6 +2332,10 @@ fn process_inputs<L: RecordLayout>(
         "event ID remaps: {fallback_count}, {:.3}s",
         began.elapsed().as_secs_f64()
     );
+    let remaps = PersonRemaps {
+        locals,
+        inline: &identity.inline_ids,
+    };
     let events = dedup_events(
         parsed.raw,
         &event_id_remaps,
@@ -2001,7 +2493,7 @@ mod tests {
     fn unknown_people_merge_across_workers_and_preserve_exact_bytes() {
         let mut identity = Identity {
             ids: Map::default(),
-            inline_ids: Map::default(),
+            inline_ids: InlineIds::default(),
             names: vec![b"unused minimum"],
         };
         identity
@@ -2009,15 +2501,16 @@ mod tests {
             .insert(inline_person::encode(b"alias").unwrap(), named_person(0));
         let mut a = LocalPeople::new(0, 2);
         let mut b = LocalPeople::new(3, 2);
-        assert_eq!(a.intern(b"alias", &identity), named_person(0));
+        let alias = a.intern(b"alias");
+        assert_eq!(alias, inline_person::encode(b"alias").unwrap());
         // Long/UTF-8 names take the exact byte-keyed fallback across workers.
         let shared = " user-Ω\0\r".as_bytes();
         let distinct = " User-Ω\0\r".as_bytes();
-        let ak = a.intern(shared, &identity);
-        let bk = b.intern(shared, &identity);
-        let other = b.intern(distinct, &identity);
-        let direct = a.intern(b"\0\r001", &identity);
-        assert_eq!(direct, b.intern(b"\0\r001", &identity));
+        let ak = a.intern(shared);
+        let bk = b.intern(shared);
+        let other = b.intern(distinct);
+        let direct = a.intern(b"\0\r001");
+        assert_eq!(direct, b.intern(b"\0\r001"));
         let remaps = merge_people(&mut identity, vec![a.names, vec![], vec![], b.names]);
         assert_eq!(
             resolve_person(ak, &remaps, 2),
@@ -2030,6 +2523,13 @@ mod tests {
         assert_eq!(resolve_person(direct, &remaps, 2), direct);
         assert_eq!(identity.names.len(), 3);
         assert_eq!(identity.lookup(b"alias"), Some(named_person(0)));
+        let resolver = PersonRemaps {
+            locals: remaps.clone(),
+            inline: &identity.inline_ids,
+        };
+        assert_eq!(resolver.resolve(alias, 2), named_person(0));
+        assert_eq!(resolver.resolve(direct, 2), direct);
+        assert_eq!(resolver.resolve(ak, 2), resolve_person(ak, &remaps, 2));
     }
     #[test]
     fn inline_keys_and_fallback_tags_never_alias() {
@@ -2078,7 +2578,7 @@ mod tests {
         let output = dedup_events(
             vec![vec![vec![later, other_later, invalid, other]]],
             &EventIdRemaps::default(),
-            &[],
+            &Vec::<Vec<u64>>::new(),
             0,
             1,
             1,
@@ -2145,7 +2645,8 @@ mod tests {
         assert_eq!(clicks[1].id, b"\0");
         assert_eq!(clicks[2].id, b"later");
         sort_events::<Wide>(&mut []);
-        sort_clicks::<Wide>(&mut []);
+        sort_clicks::<Wide>(&mut Vec::new());
+        sort_clicks::<Packed>(&mut Vec::new());
     }
     #[test]
     fn strict_csv() {
@@ -2188,14 +2689,14 @@ mod combined_id_tests {
     fn both_remap_domains_and_invalid_minimum_survive_hash_collisions() {
         let mut identity = Identity {
             ids: Map::default(),
-            inline_ids: Map::default(),
+            inline_ids: InlineIds::default(),
             names: Vec::new(),
         };
         let mut people_a = LocalPeople::new(0, 2);
         let mut people_b = LocalPeople::new(3, 2);
-        let pa = people_a.intern("long-person-Ω".as_bytes(), &identity);
-        let pb = people_b.intern("long-person-Ω".as_bytes(), &identity);
-        let other = people_b.intern("long-person-ω".as_bytes(), &identity);
+        let pa = people_a.intern("long-person-Ω".as_bytes());
+        let pb = people_b.intern("long-person-Ω".as_bytes());
+        let other = people_b.intern("long-person-ω".as_bytes());
         let person_remaps = merge_people(
             &mut identity,
             vec![people_a.names, vec![], vec![], people_b.names],
@@ -2486,7 +2987,7 @@ mod identity_entry_tests {
         let mut map = memmap2::MmapMut::map_anon(bytes.len()).unwrap();
         map.copy_from_slice(&bytes);
         let files = [InputFile::Mapped(map.make_read_only().unwrap())];
-        let identity = identities(&files);
+        let identity = identities(&files, 2);
         assert_eq!(identity.names.len(), 6);
         assert_eq!(identity.inline_ids.len(), 4);
         assert_eq!(identity.ids.len(), 2);
@@ -2517,6 +3018,46 @@ mod packed_pipeline_tests {
         assert_eq!(std::mem::size_of::<Event<Packed>>(), 16);
         assert_eq!(std::mem::size_of::<Click<Wide>>(), 40);
         assert_eq!(std::mem::size_of::<Click<Packed>>(), 32);
+    }
+    #[test]
+    fn packed_click_sort_matches_comparator_including_id_ties() {
+        let ids: [&[u8]; 7] = [b"", b"\0", b"A", b"a", b"ab", b"b", b"\xff"];
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move |bound: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % bound
+        };
+        for round in 0..40 {
+            let len = [0, 1, 2, 3, 17, 300, 5000][round % 7];
+            let mut clicks: Vec<Click<Packed>> = (0..len)
+                .map(|_| {
+                    let id = ids[next(ids.len() as u64) as usize];
+                    Click::<Packed> {
+                        person: [0, 1, 7, u64::MAX, 1 << 63][next(5) as usize],
+                        ts: [0, 1, 5, u32::MAX][next(4) as usize],
+                        id,
+                        // Copies of one click ID carry identical values.
+                        campaign: id.len() as u32,
+                    }
+                })
+                .collect();
+            let mut expected = clicks.clone();
+            expected.sort_by(|a, b| {
+                a.person
+                    .cmp(&b.person)
+                    .then(a.ts.cmp(&b.ts))
+                    .then_with(|| b.id.cmp(a.id))
+            });
+            sort_clicks(&mut clicks);
+            let view = |c: &[Click<Packed>]| {
+                c.iter()
+                    .map(|c| (c.person, c.ts, c.id.to_vec(), c.campaign))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(view(&clicks), view(&expected), "round {round}");
+        }
     }
     #[test]
     fn packed_dedup_keeps_invalid_earliest_across_chunks_and_remaps() {
@@ -2556,9 +3097,9 @@ mod packed_pipeline_tests {
         for linear in [false, true] {
             let mut output = vec![Vec::new()];
             assert!(if linear {
-                dedup_chunks_slots::<true, Packed>(&chunks, &remaps, &[], 0, &mut output)
+                dedup_chunks_slots::<true, Packed>(&chunks, &remaps, &Vec::<Vec<u64>>::new(), 0, &mut output)
             } else {
-                dedup_chunks_slots::<false, Packed>(&chunks, &remaps, &[], 0, &mut output)
+                dedup_chunks_slots::<false, Packed>(&chunks, &remaps, &Vec::<Vec<u64>>::new(), 0, &mut output)
             });
             sort_events(&mut output[0]);
             let actual: Vec<_> = output[0]
@@ -2575,7 +3116,7 @@ mod packed_pipeline_tests {
         }
         let mut flat = flatten(chunks);
         let mut output = vec![Vec::new()];
-        dedup_rows_sorted(&mut flat, &remaps, &[], 0, &mut output);
+        dedup_rows_sorted(&mut flat, &remaps, &Vec::<Vec<u64>>::new(), 0, &mut output);
         sort_events(&mut output[0]);
         assert_eq!(output[0].len(), 2);
         assert_eq!(Packed::epoch(output[0][0].ts, base), 7);
@@ -2653,5 +3194,96 @@ mod vq_packed_layout_tests {
         let mut actual: Vec<_> = events.iter().map(|e| (e.person, e.ts, e.revenue)).collect();
         actual.sort_unstable();
         assert_eq!(actual, expected);
+    }
+}
+
+#[cfg(test)]
+mod parallel_identity_tests {
+    use super::*;
+    fn mapped(bytes: &[u8]) -> InputFile {
+        let mut map = memmap2::MmapMut::map_anon(bytes.len()).unwrap();
+        map.copy_from_slice(bytes);
+        InputFile::Mapped(map.make_read_only().unwrap())
+    }
+    fn canonical_of(identity: &Identity<'_>, key: u64) -> Option<u64> {
+        identity.inline_ids.get(&key).copied()
+    }
+    #[test]
+    fn parallel_links_match_serial_builder_exactly() {
+        let alphabet: &[u8] = b"abcXYZ09\0 \r\"";
+        let state = std::cell::Cell::new(0x2545_f491_4f6c_dd1du64);
+        let step = || {
+            let mut x = state.get();
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            state.set(x);
+            x
+        };
+        for round in 0..24 {
+            let mut files = Vec::new();
+            let mut all_keys = Vec::new();
+            for _ in 0..1 + round % 4 {
+                let mut bytes = b"user_id_a,user_id_b\n".to_vec();
+                for _ in 0..(step() % 3000) {
+                    let id = |bytes: &mut Vec<u8>| {
+                        let len = 1 + (step() % 9) as usize;
+                        let quoted = step() % 5 == 0;
+                        if quoted {
+                            bytes.push(b'"');
+                        }
+                        let mut name = Vec::new();
+                        for _ in 0..len {
+                            let c = alphabet[(step() % (alphabet.len() as u64 - 1)) as usize];
+                            name.push(if c == b'"' { b'q' } else { c });
+                        }
+                        bytes.extend_from_slice(&name);
+                        if quoted {
+                            bytes.push(b'"');
+                        }
+                        name
+                    };
+                    match step() % 40 {
+                        0 => bytes.extend_from_slice(b",x\n"),
+                        1 => bytes.extend_from_slice(b"\n"),
+                        2 => bytes.extend_from_slice(b"a,b,c\n"),
+                        _ => {
+                            let a = id(&mut bytes);
+                            bytes.push(b',');
+                            let b = if step() % 50 == 0 { a.clone() } else { id(&mut bytes) };
+                            if b == a {
+                                bytes.extend_from_slice(&a);
+                            }
+                            bytes.push(b'\n');
+                            all_keys.push(inline_person::encode(&a).unwrap());
+                            all_keys.push(inline_person::encode(&b).unwrap());
+                        }
+                    }
+                }
+                files.push(mapped(&bytes));
+            }
+            let serial = identities_phased(&files);
+            for ncpu in [1, 3, 8] {
+                let parallel = identities_parallel(&files, ncpu).expect("inline-only input");
+                assert_eq!(parallel.inline_ids.len(), serial.inline_ids.len());
+                assert!(parallel.ids.is_empty() && serial.ids.is_empty());
+                for &key in &all_keys {
+                    assert_eq!(canonical_of(&parallel, key), canonical_of(&serial, key));
+                }
+                for (key, value) in serial.inline_ids.iter() {
+                    assert_eq!(canonical_of(&parallel, key), Some(value));
+                }
+            }
+        }
+    }
+    #[test]
+    fn long_or_non_ascii_ids_fall_back_to_serial_builder() {
+        let files = [mapped("a,b\nlong-identifier-x,a\n".as_bytes())];
+        assert!(identities_parallel(&files, 4).is_none());
+        let files = [mapped("a,b\nΩ,a\n".as_bytes())];
+        assert!(identities_parallel(&files, 4).is_none());
+        let files = [mapped(b"a,b\n")];
+        let identity = identities(&files, 4);
+        assert_eq!(identity.inline_ids.len(), 0);
     }
 }
