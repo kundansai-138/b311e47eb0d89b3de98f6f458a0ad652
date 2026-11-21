@@ -21,7 +21,7 @@ def main():
     args.report.mkdir(parents=True, exist_ok=True)
     threads = 8
     quota = min(4, len(os.sched_getaffinity(0)))
-    variants = ["baseline", "inline", "optimized"]
+    variants = ["baseline", "reference", "optimized"]
     records = []
     first_outputs = {}
     with tempfile.TemporaryDirectory(prefix="shopping-benchmark-", ignore_cleanup_errors=True) as temp:
@@ -45,7 +45,6 @@ def main():
                        "-v", f"{output}:/output", "-v", f"{scratch}:/scratch",
                        "-e", "DATA_DIR=/data", "-e", "OUTPUT_DIR=/output", "-e", "SCRATCH_DIR=/scratch",
                        "-e", "HOME=/scratch", "-e", f"NCPU={threads}", "-e", "MEM_GB=12",
-                       "-e", "ROUND2_PARTITION_FACTOR=16",
                        f"shopping-sessions:{variant}"]
                 log = args.report / f"{variant}-{repetition}.log"
                 try:
@@ -71,10 +70,10 @@ def main():
             print(f"{table}: all {tables[0].num_rows} rows exactly equal", flush=True)
         medians = {v: statistics.median(r["seconds"] for r in records if r["variant"] == v)
                    for v in variants}
-        report = {"baseline_commit": "05a1cf788aa499b9c2d3fbaf2f03a437695d2749",
-                  "inline_reference_commit": "6df9854756a575ae73517782a7fa96fae333fd98",
+        report = {"baseline_commit": "d52cca7d96130444086754510f8e298d5390eb84",
+                  "reference_commit": "992b7672b54988c773f6d78cb260b3af9a370c7e", "reference_context": ".bench/pgo-combined",
                   "candidate_commit": os.environ.get("GITHUB_SHA", "local"), "threads": threads, "cpu_quota": quota, "memory_limit_bytes": 12*1024**3, "runs": records,
-                  "medians_seconds": medians, "speedup": medians["baseline"]/medians["optimized"],
+                  "medians_seconds": medians, "speedups": {v:medians["baseline"]/medians[v] for v in variants},
                   "exact_output_match": True}
         (args.report / "results.json").write_text(json.dumps(report, indent=2)+"\n")
         print(json.dumps(report), flush=True)

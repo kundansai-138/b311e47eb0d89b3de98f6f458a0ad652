@@ -1,0 +1,4 @@
+event_id,user_id,ts,ingest_ts,event_type,product_id,price_cents
+after,u,1795107767296,2026-11-19T17:02:47Z,"purchase","missing","10000000"
+first,u,1790812800000,"2026-10-01T00:00:00Z",purchase,missing,10000000
+last,"u",1795107767295,"2026-11-19T17:02:47Z","purchase","missing","10000000"

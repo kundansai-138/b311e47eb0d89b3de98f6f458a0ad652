@@ -227,38 +227,4 @@ mod tests {
             check::<7>(&bytes);
         }
     }
-
-    #[test]
-    #[ignore = "explicit bounded parser microbenchmark"]
-    fn microbench_parser() {
-        use std::hint::black_box;
-        use std::time::Instant;
-        let line=b"\"event_123456\",u_123456_2,2026-10-03T23:58:10Z,2026-10-03T23:58:15Z,purchase,\"p_12345\",250\n";
-        let mut bytes = Vec::with_capacity(line.len() * 100_000);
-        for _ in 0..100_000 {
-            bytes.extend_from_slice(line);
-        }
-        for mode in ["baseline", "fused"] {
-            let start = Instant::now();
-            let mut sum = 0usize;
-            for _ in 0..5 {
-                let input = black_box(bytes.as_slice());
-                if mode == "baseline" {
-                    for f in input.split(|&b| b == b'\n').filter_map(crate::fields::<7>) {
-                        sum += black_box(f)[0].len();
-                    }
-                } else {
-                    for f in Rows::<7>::new(input) {
-                        sum += black_box(f)[0].len();
-                    }
-                }
-            }
-            eprintln!(
-                "parser_microbench {mode}: bytes={} seconds={:.6} checksum={}",
-                bytes.len() * 5,
-                start.elapsed().as_secs_f64(),
-                black_box(sum)
-            );
-        }
-    }
 }

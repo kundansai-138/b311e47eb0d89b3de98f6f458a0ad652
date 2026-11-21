@@ -1,0 +1,5 @@
+event_id,user_id,ts,ingest_ts,event_type,product_id,price_cents
+boundary,"u",1970-01-01T00:00:00Z,"1970-01-01T00:00:00Z","purchase","p1","1"
+invalid,"u",1969-12-20T12:34:57Z,1969-12-20T12:34:57Z,purchase,p1,999
+invalid,u,invalid,1969-12-20T12:34:56Z,"purchase","p1","999"
+negative,u,1969-12-20T12:34:57Z,"1969-12-20T12:34:57Z",purchase,missing,10000000

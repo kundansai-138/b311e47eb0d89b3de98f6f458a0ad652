@@ -1,5 +1,12 @@
 //! Exact native CSV, session, attribution, and Parquet engine.
+#[cfg(feature = "swar-digits")]
+mod decimal_word;
 mod event_ids;
+mod record_layout;
+mod simd_sort;
+use record_layout::{can_pack, Packed, RecordLayout, Wide};
+#[cfg(feature = "swar-clock")]
+mod clock_word;
 mod inline_person;
 mod parquet_output;
 mod timestamp_parser;
@@ -18,6 +25,8 @@ use timestamp_parser::TimestampParser;
 
 #[cfg(feature = "fast-csv")]
 mod fast_csv;
+#[cfg(feature = "row-csv")]
+mod row_csv;
 
 const DAY: i64 = 86_400_000;
 const WEEK: i64 = 7 * DAY;
@@ -92,10 +101,15 @@ fn hash_bytes(bytes: &[u8]) -> u64 {
     mix64(h ^ tail_word)
 }
 
-#[cfg(feature = "fast-csv")]
+#[cfg(all(feature = "fast-csv", not(feature = "row-csv")))]
 #[inline]
 fn rows<const N: usize>(bytes: &[u8]) -> fast_csv::Rows<'_, N> {
     fast_csv::Rows::new(bytes)
+}
+#[cfg(feature = "row-csv")]
+#[inline]
+fn rows<const N: usize>(bytes: &[u8]) -> row_csv::Rows<'_, N> {
+    row_csv::Rows::new(bytes)
 }
 #[cfg(not(feature = "fast-csv"))]
 #[inline]
@@ -160,7 +174,7 @@ fn digits(bytes: &[u8]) -> Option<i64> {
     }
     Some(n)
 }
-#[cfg(feature = "fast-digits")]
+#[cfg(all(feature = "fast-digits", not(feature = "swar-digits")))]
 #[inline]
 fn digits(mut bytes: &[u8]) -> Option<i64> {
     if bytes.is_empty() {
@@ -183,6 +197,12 @@ fn digits(mut bytes: &[u8]) -> Option<i64> {
         n = n * 10 + digit as u64;
     }
     (n <= i64::MAX as u64).then_some(n as i64)
+}
+
+#[cfg(feature = "swar-digits")]
+#[inline]
+fn digits(bytes: &[u8]) -> Option<i64> {
+    decimal_word::parse(bytes)
 }
 
 #[inline]
@@ -360,7 +380,120 @@ fn root(parents: &mut [usize], mut i: usize) -> usize {
     }
     i
 }
+#[derive(Clone, Copy)]
+struct IdentityNode {
+    parent: u32,
+    size: u32,
+    minimum: u32,
+}
+#[inline]
+fn compact_root(nodes: &mut [IdentityNode], mut index: u32) -> u32 {
+    while nodes[index as usize].parent != index {
+        let parent = nodes[index as usize].parent;
+        let grandparent = nodes[parent as usize].parent;
+        nodes[index as usize].parent = grandparent;
+        index = grandparent;
+    }
+    index
+}
 fn identities(files: &[InputFile]) -> Identity<'_> {
+    identities_phased(files)
+}
+
+fn identities_phased(files: &[InputFile]) -> Identity<'_> {
+    use std::collections::hash_map::Entry;
+    let reserve = files
+        .iter()
+        .map(|f| {
+            body(f)
+                .iter()
+                .filter(|&&b| b == b'\n')
+                .count()
+                .saturating_mul(2)
+        })
+        .sum::<usize>();
+    let mut ids = Map::default();
+    let mut inline_ids = Map::with_capacity_and_hasher(reserve, Default::default());
+    let mut names = Vec::with_capacity(reserve);
+    let bound = reserve.saturating_add(files.len().saturating_mul(2));
+    if bound > u32::MAX as usize {
+        return identities_wide(files);
+    }
+    let mut nodes: Vec<IdentityNode> = Vec::with_capacity(reserve);
+    let mut edges = Vec::with_capacity(reserve / 2);
+    for data in files {
+        for [a, b] in rows::<2>(body(data)) {
+            if a.is_empty() || b.is_empty() {
+                continue;
+            }
+            let mut add = |name| {
+                let index = names.len();
+                match inline_person::encode(name) {
+                    Some(key) => match inline_ids.entry(key) {
+                        Entry::Occupied(entry) => return usize::try_from(*entry.get()).unwrap(),
+                        Entry::Vacant(entry) => {
+                            entry.insert(checked_index(index));
+                        }
+                    },
+                    None => match ids.entry(name) {
+                        Entry::Occupied(entry) => return usize::try_from(*entry.get()).unwrap(),
+                        Entry::Vacant(entry) => {
+                            entry.insert(checked_index(index));
+                        }
+                    },
+                }
+                names.push(name);
+                let compact = u32::try_from(index).expect("checked identity-node bound");
+                nodes.push(IdentityNode {
+                    parent: compact,
+                    size: 1,
+                    minimum: compact,
+                });
+                index
+            };
+            let ia = add(a);
+            let ib = add(b);
+            edges.push((u32::try_from(ia).unwrap(), u32::try_from(ib).unwrap()));
+        }
+    }
+    for (ia, ib) in edges {
+        let mut ra = compact_root(&mut nodes, ia) as usize;
+        let mut rb = compact_root(&mut nodes, ib) as usize;
+        if ra != rb {
+            if nodes[ra].size < nodes[rb].size {
+                std::mem::swap(&mut ra, &mut rb);
+            }
+            nodes[rb].parent = u32::try_from(ra).unwrap();
+            nodes[ra].size += nodes[rb].size;
+            if names[nodes[rb].minimum as usize] < names[nodes[ra].minimum as usize] {
+                nodes[ra].minimum = nodes[rb].minimum;
+            }
+        }
+    }
+    {
+        let mut canonical = vec![0u64; nodes.len()];
+        for index in 0..nodes.len() {
+            let root = compact_root(&mut nodes, u32::try_from(index).unwrap()) as usize;
+            if canonical[root] == 0 {
+                let minimum = nodes[root].minimum as usize;
+                canonical[root] =
+                    inline_person::encode(names[minimum]).unwrap_or_else(|| named_person(minimum));
+            }
+            canonical[index] = canonical[root];
+        }
+        drop(nodes);
+        for index in ids.values_mut().chain(inline_ids.values_mut()) {
+            *index = canonical[usize::try_from(*index).unwrap()];
+        }
+    }
+
+    Identity {
+        ids,
+        inline_ids,
+        names,
+    }
+}
+fn identities_wide(files: &[InputFile]) -> Identity<'_> {
     use std::collections::hash_map::Entry;
     let reserve = files
         .iter()
@@ -577,30 +710,31 @@ fn catalog<'a>(products: &'a [u8], campaigns: &'a [u8]) -> Catalog<'a> {
 #[derive(Clone, Copy)]
 // Validation is computed while fields are hot, but invalid copies remain as
 // tombstones (INVALID_PERSON sentinel) until the earliest ingest is selected globally.
-struct Raw {
+struct Raw<L: RecordLayout = Wide> {
     id: u64,
     person: u64,
     ingest: i64,
-    ts: i64,
+    ts: L::Time,
     revenue: u32,
-    category: u32,
+    category: L::Category,
 }
 #[derive(Clone, Copy)]
-struct Event {
-    ts: i64,
+#[repr(C)]
+struct Event<L: RecordLayout = Wide> {
+    revenue: u32,
+    category: L::Category,
+    ts: L::Time,
     person: u64,
-    revenue: u32,
-    category: u32,
 }
 #[derive(Clone, Copy)]
-struct Click<'a> {
+struct Click<'a, L: RecordLayout = Wide> {
     id: &'a [u8],
-    ts: i64,
+    ts: L::Time,
     person: u64,
     campaign: u32,
 }
-struct ParsedEvents<'a> {
-    raw: Vec<Vec<Vec<Raw>>>,
+struct ParsedEvents<'a, L: RecordLayout> {
+    raw: Vec<Vec<Vec<Raw<L>>>>,
     unknown: Vec<Vec<&'a [u8]>>,
     fallback_events: Vec<Vec<EventIdName<'a>>>,
     worker_bits: u32,
@@ -655,7 +789,7 @@ fn flatten<T>(parts: Vec<Vec<T>>) -> Vec<T> {
     }
     result
 }
-fn parse_events<'a>(
+fn parse_events<'a, L: RecordLayout>(
     tasks: &[&'a [u8]],
     identity: &Identity<'a>,
     catalog: &Catalog<'a>,
@@ -663,7 +797,7 @@ fn parse_events<'a>(
     end: i64,
     ncpu: usize,
     partitions: usize,
-) -> ParsedEvents<'a> {
+) -> ParsedEvents<'a, L> {
     let next = AtomicUsize::new(0);
     let worker_bits = ncpu.next_power_of_two().trailing_zeros();
     let workers = thread::scope(|s| {
@@ -698,11 +832,18 @@ fn parse_events<'a>(
                                 &mut timestamps,
                             ) {
                                 Some((name, ts, revenue, category)) => {
+                                    let (ts, revenue, category) =
+                                        L::encode(ts, revenue, category, start);
                                     (people.intern(name, identity), ts, revenue, category)
                                 }
-                                None => (INVALID_PERSON, 0, 0, 0),
+                                None => (
+                                    INVALID_PERSON,
+                                    L::Time::default(),
+                                    0,
+                                    L::Category::default(),
+                                ),
                             };
-                            result[(hash as usize) % partitions].push(Raw {
+                            result[(hash as usize) % partitions].push(Raw::<L> {
                                 id,
                                 person,
                                 ingest,
@@ -738,15 +879,19 @@ fn parse_events<'a>(
 }
 #[cfg(test)]
 #[inline]
-fn raw_id(raw: Raw, event_id_remaps: &EventIdRemaps) -> u64 {
+fn raw_id<L: RecordLayout>(raw: Raw<L>, event_id_remaps: &EventIdRemaps) -> u64 {
     event_id_remaps.canonical(raw.id)
 }
 #[inline]
-fn accepted(raw: Raw, remaps: &[Vec<u64>], worker_bits: u32) -> Option<Event> {
+fn accepted<L: RecordLayout>(
+    raw: Raw<L>,
+    remaps: &[Vec<u64>],
+    worker_bits: u32,
+) -> Option<Event<L>> {
     if raw.person == INVALID_PERSON {
         return None;
     }
-    Some(Event {
+    Some(Event::<L> {
         person: resolve_person(raw.person, remaps, worker_bits),
         ts: raw.ts,
         revenue: raw.revenue,
@@ -790,14 +935,14 @@ fn validate_fields<'a>(
     Some((f[1], ts, revenue, category))
 }
 #[cfg(test)]
-fn dedup_events_baseline(
-    inputs: Vec<Vec<Vec<Raw>>>,
+fn dedup_events_baseline<L: RecordLayout>(
+    inputs: Vec<Vec<Vec<Raw<L>>>>,
     event_id_remaps: &EventIdRemaps,
     remaps: &[Vec<u64>],
     worker_bits: u32,
     ncpu: usize,
     partitions: usize,
-) -> Vec<Vec<Vec<Event>>> {
+) -> Vec<Vec<Vec<Event<L>>>> {
     let jobs: Vec<_> = inputs.into_iter().map(|x| Mutex::new(Some(x))).collect();
     let next = AtomicUsize::new(0);
     let workers = thread::scope(|s| {
@@ -828,7 +973,7 @@ fn dedup_events_baseline(
                             } else {
                                 // Usually one event and a few duplicates. Preserve separate
                                 // IDs even if their full 64-bit hashes collide.
-                                let mut kept: Vec<Raw> = Vec::with_capacity(1);
+                                let mut kept: Vec<Raw<L>> = Vec::with_capacity(1);
                                 for &r in &rows[pos..last] {
                                     let id = raw_id(r, event_id_remaps);
                                     if let Some(previous) =
@@ -874,7 +1019,12 @@ fn dedup_slot_capacity(records: usize) -> Option<usize> {
 }
 
 #[inline]
-fn emit_dedup_row(row: Raw, remaps: &[Vec<u64>], worker_bits: u32, output: &mut [Vec<Event>]) {
+fn emit_dedup_row<L: RecordLayout>(
+    row: Raw<L>,
+    remaps: &[Vec<u64>],
+    worker_bits: u32,
+    output: &mut [Vec<Event<L>>],
+) {
     if let Some(event) = accepted(row, remaps, worker_bits) {
         let partition = person_partition(event.person, output.len());
         output[partition].push(event);
@@ -882,12 +1032,12 @@ fn emit_dedup_row(row: Raw, remaps: &[Vec<u64>], worker_bits: u32, output: &mut 
 }
 
 /// Fallback for a part that cannot be represented by the compact table.
-fn dedup_rows_sorted(
-    rows: &mut [Raw],
+fn dedup_rows_sorted<L: RecordLayout>(
+    rows: &mut [Raw<L>],
     event_id_remaps: &EventIdRemaps,
     remaps: &[Vec<u64>],
     worker_bits: u32,
-    output: &mut [Vec<Event>],
+    output: &mut [Vec<Event<L>>],
 ) {
     rows.sort_unstable_by_key(|row| event_id_remaps.hash(row.id));
     let mut first = 0;
@@ -912,7 +1062,7 @@ fn dedup_rows_sorted(
         if !collision {
             emit_dedup_row(earliest, remaps, worker_bits, output);
         } else {
-            let mut kept: Vec<Raw> = Vec::new();
+            let mut kept: Vec<Raw<L>> = Vec::new();
             for &row in &rows[first..end] {
                 if let Some(previous) = kept
                     .iter_mut()
@@ -934,14 +1084,14 @@ fn dedup_rows_sorted(
 }
 
 /// Returns false before emitting anything if compact indices cannot represent
-/// this part. Raw records stay immutable, including invalid-copy tombstones.
+/// this part. Raw<L> records stay immutable, including invalid-copy tombstones.
 #[cfg(test)]
-fn dedup_rows_slots<const LINEAR_OUTPUT: bool>(
-    rows: &[Raw],
+fn dedup_rows_slots<const LINEAR_OUTPUT: bool, L: RecordLayout>(
+    rows: &[Raw<L>],
     event_id_remaps: &EventIdRemaps,
     remaps: &[Vec<u64>],
     worker_bits: u32,
-    output: &mut [Vec<Event>],
+    output: &mut [Vec<Event<L>>],
 ) -> bool {
     let Some(capacity) = dedup_slot_capacity(rows.len()) else {
         return false;
@@ -970,7 +1120,7 @@ fn dedup_rows_slots<const LINEAR_OUTPUT: bool>(
                 break;
             }
             // The fingerprint rejects almost every occupied probe without a
-            // random Raw load. It never decides identity on its own.
+            // random Raw<L> load. It never decides identity on its own.
             if (slot >> 32) as u32 == fingerprint {
                 let previous_index = (slot as u32 - 1) as usize;
                 let previous = &rows[previous_index];
@@ -990,7 +1140,7 @@ fn dedup_rows_slots<const LINEAR_OUTPUT: bool>(
     }
     if LINEAR_OUTPUT {
         // A byte per original record replaces random survivor gathers with
-        // one sequential Raw scan. Only duplicate replacements write backwards.
+        // one sequential Raw<L> scan. Only duplicate replacements write backwards.
         for (row, &winner) in rows.iter().zip(&winners) {
             if winner != 0 {
                 emit_dedup_row(*row, remaps, worker_bits, output);
@@ -1054,14 +1204,14 @@ impl ChunkRefLayout {
     }
 }
 
-/// No Raw records move on this path. Only fingerprint matches read an old Raw
+/// No Raw<L> records move on this path. Only fingerprint matches read an old Raw<L>
 /// through its chunk reference, and selected records are emitted sequentially.
-fn dedup_chunks(
-    chunks: &[Vec<Raw>],
+fn dedup_chunks<L: RecordLayout>(
+    chunks: &[Vec<Raw<L>>],
     event_id_remaps: &EventIdRemaps,
     remaps: &[Vec<u64>],
     worker_bits: u32,
-    output: &mut [Vec<Event>],
+    output: &mut [Vec<Event<L>>],
 ) -> bool {
     let Some((layout, count)) = ChunkRefLayout::for_lengths(chunks.iter().map(Vec::len)) else {
         return false;
@@ -1114,12 +1264,12 @@ fn dedup_chunks(
 }
 
 #[cfg(test)]
-fn dedup_chunks_slot_reference<const LINEAR_OUTPUT: bool>(
-    chunks: &[Vec<Raw>],
+fn dedup_chunks_slot_reference<const LINEAR_OUTPUT: bool, L: RecordLayout>(
+    chunks: &[Vec<Raw<L>>],
     event_id_remaps: &EventIdRemaps,
     remaps: &[Vec<u64>],
     worker_bits: u32,
-    output: &mut [Vec<Event>],
+    output: &mut [Vec<Event<L>>],
 ) -> bool {
     let Some((layout, count)) = ChunkRefLayout::for_lengths(chunks.iter().map(Vec::len)) else {
         return false;
@@ -1189,28 +1339,34 @@ fn dedup_chunks_slot_reference<const LINEAR_OUTPUT: bool>(
 }
 
 #[cfg(test)]
-fn dedup_chunks_slots<const LINEAR_OUTPUT: bool>(
-    chunks: &[Vec<Raw>],
+fn dedup_chunks_slots<const LINEAR_OUTPUT: bool, L: RecordLayout>(
+    chunks: &[Vec<Raw<L>>],
     event_id_remaps: &EventIdRemaps,
     remaps: &[Vec<u64>],
     worker_bits: u32,
-    output: &mut [Vec<Event>],
+    output: &mut [Vec<Event<L>>],
 ) -> bool {
     if LINEAR_OUTPUT {
         dedup_chunks(chunks, event_id_remaps, remaps, worker_bits, output)
     } else {
-        dedup_chunks_slot_reference::<false>(chunks, event_id_remaps, remaps, worker_bits, output)
+        dedup_chunks_slot_reference::<false, L>(
+            chunks,
+            event_id_remaps,
+            remaps,
+            worker_bits,
+            output,
+        )
     }
 }
 
-fn dedup_events(
-    inputs: Vec<Vec<Vec<Raw>>>,
+fn dedup_events<L: RecordLayout>(
+    inputs: Vec<Vec<Vec<Raw<L>>>>,
     event_id_remaps: &EventIdRemaps,
     remaps: &[Vec<u64>],
     worker_bits: u32,
     ncpu: usize,
     partitions: usize,
-) -> Vec<Vec<Vec<Event>>> {
+) -> Vec<Vec<Vec<Event<L>>>> {
     let input_rows: usize = inputs
         .iter()
         .flat_map(|parts| parts.iter())
@@ -1258,7 +1414,7 @@ fn dedup_events(
     transpose(workers, partitions)
 }
 
-fn parse_clicks<'a>(
+fn parse_clicks<'a, L: RecordLayout>(
     tasks: &[&'a [u8]],
     identity: &Identity<'a>,
     catalog: &Catalog<'a>,
@@ -1266,7 +1422,7 @@ fn parse_clicks<'a>(
     end: i64,
     ncpu: usize,
     partitions: usize,
-) -> Vec<Vec<Vec<Click<'a>>>> {
+) -> Vec<Vec<Vec<Click<'a, L>>>> {
     let next = AtomicUsize::new(0);
     let workers = thread::scope(|s| {
         let handles: Vec<_> = (0..ncpu)
@@ -1298,10 +1454,10 @@ fn parse_clicks<'a>(
                             let Some(person) = identity.lookup(user) else {
                                 continue;
                             };
-                            output[person_partition(person, partitions)].push(Click {
+                            output[person_partition(person, partitions)].push(Click::<L> {
                                 person,
                                 id,
-                                ts,
+                                ts: L::encode(ts, 0, 0, start - WEEK).0,
                                 campaign,
                             });
                         }
@@ -1424,10 +1580,23 @@ fn flush_user(
     }
     writer.push(person, agg.day, agg.sessions, agg.events, agg.revenue, best)
 }
-fn sort_events(events: &mut [Event]) {
+fn sort_events<L: RecordLayout>(events: &mut [Event<L>]) {
+    if L::PACKED_SORT_KEY {
+        // The only packed layout is repr(C) {attrs:u32,time:u32,person:u64}.
+        // All bytes are initialized integers, with no padding. Its little-endian
+        // unsigned 128-bit key orders (person,time,attrs). Metric ordering within
+        // equal person/time does not affect sessions or integer aggregation.
+        assert_eq!(std::mem::size_of::<Event<L>>(), 16);
+        assert_eq!(std::mem::offset_of!(Event<L>, revenue), 0);
+        assert_eq!(std::mem::offset_of!(Event<L>, ts), 4);
+        assert_eq!(std::mem::offset_of!(Event<L>, person), 8);
+        if unsafe { simd_sort::try_sort_records(events.as_mut_ptr().cast(), events.len()) } {
+            return;
+        }
+    }
     events.sort_unstable_by(|a, b| a.person.cmp(&b.person).then(a.ts.cmp(&b.ts)));
 }
-fn sort_clicks(clicks: &mut [Click<'_>]) {
+fn sort_clicks<L: RecordLayout>(clicks: &mut [Click<'_, L>]) {
     clicks.sort_unstable_by(|a, b| {
         a.person
             .cmp(&b.person)
@@ -1435,22 +1604,20 @@ fn sort_clicks(clicks: &mut [Click<'_>]) {
             .then_with(|| b.id.cmp(a.id))
     });
 }
-fn process_partition(
-    mut events: Vec<Event>,
-    mut clicks: Vec<Click<'_>>,
+fn process_partition<L: RecordLayout>(
+    mut events: Vec<Event<L>>,
+    mut clicks: Vec<Click<'_, L>>,
     catalog: &Catalog<'_>,
     names: &[&[u8]],
-    out: PathBuf,
-    day_min: i32,
-    day_count: usize,
-) -> io::Result<(CampaignMap, u64)> {
+    writer: &mut UserWriter,
+    campaign_rows: &mut CampaignTotals,
+    time_base: i64,
+) -> io::Result<()> {
     sort_events(&mut events);
     sort_clicks(&mut clicks);
     // All copies have identical values. Sorting puts them together after their
     // unquoted values and canonical people have been compared exactly.
     clicks.dedup_by(|a, b| a.person == b.person && a.ts == b.ts && a.id == b.id);
-    let mut writer = UserWriter::new(out)?;
-    let mut campaign_rows = CampaignTotals::new(day_min, day_count, catalog.campaign_values.len());
     let mut ev = 0;
     let mut ck = 0;
     let nc = catalog.campaign_values.len();
@@ -1483,10 +1650,10 @@ fn process_partition(
         let mut agg = UserAgg::default();
         category_sums.fill(0);
         while ev < ev_end {
-            let start = events[ev].ts;
+            let start = L::epoch(events[ev].ts, time_base);
             let day = start.div_euclid(DAY) as i32;
             if agg.sessions > 0 && agg.day != day {
-                flush_user(&mut writer, name, &agg, &category_sums, catalog)?;
+                flush_user(writer, name, &agg, &category_sums, catalog)?;
                 agg = UserAgg::default();
                 category_sums.fill(0);
             }
@@ -1494,19 +1661,23 @@ fn process_partition(
             agg.sessions += 1;
             let first = ev;
             ev += 1;
-            while ev < ev_end && events[ev].ts - events[ev - 1].ts <= GAP {
+            while ev < ev_end && L::gap(events[ev].ts, events[ev - 1].ts) <= GAP {
                 ev += 1;
             }
             let mut session_revenue = 0i64;
             for e in &events[first..ev] {
-                session_revenue += e.revenue as i64;
-                if e.revenue > 0 {
-                    category_sums[e.category as usize] += e.revenue as i64;
+                let revenue = L::revenue(e.revenue);
+                session_revenue += i64::from(revenue);
+                if revenue > 0 {
+                    category_sums[L::category(e.revenue, e.category) as usize] +=
+                        i64::from(revenue);
                 }
             }
             agg.events += (ev - first) as i64;
             agg.revenue += session_revenue;
-            while right < person_clicks.len() && person_clicks[right].ts <= start {
+            while right < person_clicks.len()
+                && L::epoch(person_clicks[right].ts, time_base - WEEK) <= start
+            {
                 let c = person_clicks[right].campaign as usize;
                 if active_counts[c] == 0 {
                     positions[c] = active.len();
@@ -1515,7 +1686,8 @@ fn process_partition(
                 active_counts[c] += 1;
                 right += 1;
             }
-            while left < right && person_clicks[left].ts < start - WEEK {
+            while left < right && L::epoch(person_clicks[left].ts, time_base - WEEK) < start - WEEK
+            {
                 let c = person_clicks[left].campaign as usize;
                 active_counts[c] -= 1;
                 if active_counts[c] == 0 {
@@ -1542,14 +1714,14 @@ fn process_partition(
                 campaign_rows.at(campaign, day).assisted += 1;
             }
         }
-        flush_user(&mut writer, name, &agg, &category_sums, catalog)?;
+        flush_user(writer, name, &agg, &category_sums, catalog)?;
         for &campaign in &active {
             active_counts[campaign as usize] = 0;
             positions[campaign as usize] = usize::MAX;
         }
         active.clear();
     }
-    Ok((campaign_rows.into_map(), writer.finish()?))
+    Ok(())
 }
 
 fn run() -> io::Result<()> {
@@ -1597,20 +1769,54 @@ fn run() -> io::Result<()> {
     let link_data = load_files(&csv_paths(&data.join("links"))?, ncpu)?;
     let product_data = fs::read(data.join("products.csv"))?;
     let campaign_data = fs::read(data.join("campaigns.csv"))?;
-    let mut identity = identities(&link_data);
+    let identity = identities(&link_data);
     let catalog = catalog(&product_data, &campaign_data);
     eprintln!(
         "identities: {} IDs, {:.3}s",
         identity.names.len(),
         began.elapsed().as_secs_f64()
     );
+    let packed = start
+        .checked_sub(WEEK)
+        .is_some_and(|base| can_pack(base, end, catalog.categories.len()));
+    eprintln!("record layout: {}", if packed { "packed" } else { "wide" });
+    eprintln!(
+        "event sort backend: {}",
+        if packed {
+            simd_sort::backend_name()
+        } else {
+            "rust-wide"
+        }
+    );
+    if packed {
+        process_inputs::<Packed>(&data, &out, ncpu, start, end, began, identity, &catalog)
+    } else {
+        process_inputs::<Wide>(&data, &out, ncpu, start, end, began, identity, &catalog)
+    }
+}
+
+fn process_inputs<L: RecordLayout>(
+    data: &Path,
+    out: &Path,
+    ncpu: usize,
+    start: i64,
+    end: i64,
+    began: Instant,
+    identity: Identity<'_>,
+    catalog: &Catalog<'_>,
+) -> io::Result<()> {
     let event_data = load_files(&csv_paths(&data.join("events"))?, ncpu)?;
+    let mut identity = Identity {
+        ids: identity.ids,
+        inline_ids: identity.inline_ids,
+        names: identity.names,
+    };
     // Tiny fixtures need one part, not dozens of empty files. Full datasets
     // retain sixteen independent partitions per CPU for balanced work queues.
     let event_bytes: usize = event_data.iter().map(|f| f.len()).sum();
     let partitions = (event_bytes / CHUNK).clamp(1, ncpu * 16);
     let event_tasks = chunks(&event_data);
-    let parsed = parse_events(
+    let parsed = parse_events::<L>(
         &event_tasks,
         &identity,
         &catalog,
@@ -1651,7 +1857,7 @@ fn run() -> io::Result<()> {
     );
     let click_data = load_files(&csv_paths(&data.join("clicks"))?, ncpu)?;
     let click_tasks = chunks(&click_data);
-    let clicks = parse_clicks(
+    let clicks = parse_clicks::<L>(
         &click_tasks,
         &identity,
         &catalog,
@@ -1672,37 +1878,41 @@ fn run() -> io::Result<()> {
         .map(|(i, (e, c))| Mutex::new(Some((i, e, c))))
         .collect();
     let next = AtomicUsize::new(0);
+    let writer_index = AtomicUsize::new(0);
     let results = thread::scope(|s| {
         let handles: Vec<_> = (0..ncpu)
             .map(|_| {
                 s.spawn(|| -> io::Result<(CampaignMap, u64)> {
-                    let mut combined = CampaignMap::default();
-                    let mut total_users = 0;
+                    // Reuse one campaign accumulator for every partition this worker handles.
+                    let mut combined = CampaignTotals::new(
+                        start.div_euclid(DAY) as i32,
+                        ((end - 1).div_euclid(DAY) - start.div_euclid(DAY) + 1) as usize,
+                        catalog.campaign_values.len(),
+                    );
+                    let worker = writer_index.fetch_add(1, Ordering::Relaxed);
+                    // Each worker owns one bounded writer until all its parts finish.
+                    let mut writer = UserWriter::new(
+                        out.join("user_daily")
+                            .join(format!("part-worker-{worker:03}")),
+                    )?;
                     loop {
                         let i = next.fetch_add(1, Ordering::Relaxed);
                         let Some(job) = jobs.get(i) else {
                             break;
                         };
-                        let (part, e, c) = job.lock().unwrap().take().unwrap();
-                        let (rows, count) = process_partition(
+                        let (_part, e, c) = job.lock().unwrap().take().unwrap();
+                        process_partition::<L>(
                             flatten(e),
                             flatten(c),
                             &catalog,
                             &identity.names,
-                            out.join("user_daily").join(format!("part-{part:03}")),
-                            start.div_euclid(DAY) as i32,
-                            ((end - 1).div_euclid(DAY) - start.div_euclid(DAY) + 1) as usize,
+                            &mut writer,
+                            &mut combined,
+                            start,
                         )?;
-                        total_users += count;
-                        for (key, value) in rows {
-                            let r = combined.entry(key).or_default();
-                            r.sessions += value.sessions;
-                            r.purchasing += value.purchasing;
-                            r.revenue += value.revenue;
-                            r.assisted += value.assisted;
-                        }
                     }
-                    Ok((combined, total_users))
+                    let total_users = writer.finish()?;
+                    Ok((combined.into_map(), total_users))
                 })
             })
             .collect();
@@ -1837,7 +2047,7 @@ mod tests {
     }
     #[test]
     fn event_dedup_preserves_invalid_earliest() {
-        let later = Raw {
+        let later = Raw::<Wide> {
             id: inline_person::encode(b"x").unwrap(),
             person: 1,
             ingest: 200,
@@ -1845,12 +2055,12 @@ mod tests {
             revenue: 1,
             category: 0,
         };
-        let invalid = Raw {
+        let invalid = Raw::<Wide> {
             ingest: 100,
             person: INVALID_PERSON,
             ..later
         };
-        let other = Raw {
+        let other = Raw::<Wide> {
             id: inline_person::encode(b"y").unwrap(),
             person: 2,
             ingest: 150,
@@ -1858,7 +2068,7 @@ mod tests {
             revenue: 7,
             category: 0,
         };
-        let other_later = Raw {
+        let other_later = Raw::<Wide> {
             ingest: 180,
             revenue: 9,
             ..other
@@ -1879,50 +2089,50 @@ mod tests {
     #[test]
     fn dense_sorting_preserves_timestamps_and_click_id_tie_order() {
         let mut events = vec![
-            Event {
+            Event::<Wide> {
                 person: 2,
                 ts: 1,
                 revenue: 0,
                 category: 0,
             },
-            Event {
+            Event::<Wide> {
                 person: 1,
                 ts: 4,
                 revenue: 0,
                 category: 0,
             },
-            Event {
+            Event::<Wide> {
                 person: 1,
                 ts: 0,
                 revenue: 0,
                 category: 0,
             },
         ];
-        sort_events(&mut events);
+        sort_events::<Wide>(&mut events);
         assert_eq!(
             events.iter().map(|e| (e.person, e.ts)).collect::<Vec<_>>(),
             vec![(1, 0), (1, 4), (2, 1)]
         );
         let mut clicks = vec![
-            Click {
+            Click::<Wide> {
                 person: 2,
                 ts: 1,
                 id: b"a",
                 campaign: 0,
             },
-            Click {
+            Click::<Wide> {
                 person: 1,
                 ts: 1,
                 id: b"A",
                 campaign: 0,
             },
-            Click {
+            Click::<Wide> {
                 person: 1,
                 ts: 1,
                 id: b"\0",
                 campaign: 0,
             },
-            Click {
+            Click::<Wide> {
                 person: 1,
                 ts: 2,
                 id: b"later",
@@ -1932,8 +2142,8 @@ mod tests {
         sort_clicks(&mut clicks);
         assert_eq!(clicks[1].id, b"\0");
         assert_eq!(clicks[2].id, b"later");
-        sort_events(&mut []);
-        sort_clicks(&mut []);
+        sort_events::<Wide>(&mut []);
+        sort_clicks::<Wide>(&mut []);
     }
     #[test]
     fn strict_csv() {
@@ -1999,7 +2209,7 @@ mod combined_id_tests {
             EventIdRemaps::merge(vec![ids_a.names, vec![], vec![], ids_b.names], 2);
         // Force full-hash collisions between all fallback IDs and nine DEL bytes.
         event_remaps.force_fallback_hashes(mix64(u64::MAX));
-        let raw = |id, person, ingest| Raw {
+        let raw = |id, person, ingest| Raw::<Wide> {
             id,
             person,
             ingest,
@@ -2023,9 +2233,21 @@ mod combined_id_tests {
         for linear in [false, true] {
             let mut output = empty_parts(4);
             assert!(if linear {
-                dedup_rows_slots::<true>(&input, &event_remaps, &person_remaps, 2, &mut output)
+                dedup_rows_slots::<true, Wide>(
+                    &input,
+                    &event_remaps,
+                    &person_remaps,
+                    2,
+                    &mut output,
+                )
             } else {
-                dedup_rows_slots::<false>(&input, &event_remaps, &person_remaps, 2, &mut output)
+                dedup_rows_slots::<false, Wide>(
+                    &input,
+                    &event_remaps,
+                    &person_remaps,
+                    2,
+                    &mut output,
+                )
             });
             let mut actual = Vec::new();
             for (partition, events) in output.iter().enumerate() {
@@ -2105,7 +2327,7 @@ mod chunk_dedup_tests {
             vec![],
             vec![named_person(0), named_person(1)],
         ];
-        let make = |id, person, ingest, _hash: u64| Raw {
+        let make = |id, person, ingest, _hash: u64| Raw::<Wide> {
             id,
             person,
             ingest,
@@ -2142,9 +2364,9 @@ mod chunk_dedup_tests {
         for linear in [false, true] {
             let mut output = empty_parts(3);
             assert!(if linear {
-                dedup_chunks_slots::<true>(&chunks, &event_remaps, &people, 2, &mut output)
+                dedup_chunks_slots::<true, Wide>(&chunks, &event_remaps, &people, 2, &mut output)
             } else {
-                dedup_chunks_slots::<false>(&chunks, &event_remaps, &people, 2, &mut output)
+                dedup_chunks_slots::<false, Wide>(&chunks, &event_remaps, &people, 2, &mut output)
             });
             let mut actual = Vec::new();
             for (partition, events) in output.iter().enumerate() {
@@ -2164,7 +2386,7 @@ mod chunk_dedup_tests {
         for i in 0..20000usize {
             let id = (i * 193) % 3000;
             let ingest = ((i * 881) % 21001) as i64;
-            let row = Raw {
+            let row = Raw::<Wide> {
                 id: inline_person::encode(format!("id-{id}").as_bytes()).unwrap(),
                 person: if i % 19 == 0 {
                     INVALID_PERSON
@@ -2191,9 +2413,21 @@ mod chunk_dedup_tests {
         for linear in [false, true] {
             let mut output = vec![Vec::new()];
             assert!(if linear {
-                dedup_chunks_slots::<true>(&chunks, &EventIdRemaps::default(), &[], 0, &mut output)
+                dedup_chunks_slots::<true, Wide>(
+                    &chunks,
+                    &EventIdRemaps::default(),
+                    &[],
+                    0,
+                    &mut output,
+                )
             } else {
-                dedup_chunks_slots::<false>(&chunks, &EventIdRemaps::default(), &[], 0, &mut output)
+                dedup_chunks_slots::<false, Wide>(
+                    &chunks,
+                    &EventIdRemaps::default(),
+                    &[],
+                    0,
+                    &mut output,
+                )
             });
             let mut actual: Vec<_> = output[0].iter().map(|e| (e.ts, e.revenue)).collect();
             actual.sort_unstable();
@@ -2201,14 +2435,14 @@ mod chunk_dedup_tests {
         }
         for chunks in [vec![], vec![vec![]], vec![vec![]; 8]] {
             let mut output = vec![Vec::new()];
-            assert!(dedup_chunks_slots::<true>(
+            assert!(dedup_chunks_slots::<true, Wide>(
                 &chunks,
                 &EventIdRemaps::default(),
                 &[],
                 0,
                 &mut output
             ));
-            assert!(dedup_chunks_slots::<false>(
+            assert!(dedup_chunks_slots::<false, Wide>(
                 &chunks,
                 &EventIdRemaps::default(),
                 &[],
@@ -2267,5 +2501,155 @@ mod identity_entry_tests {
             inline_person::encode(b"unlinked")
         );
         assert_eq!(identity.lookup(b"unlinked-long-name"), None);
+    }
+}
+
+#[cfg(test)]
+mod packed_pipeline_tests {
+    use super::*;
+    #[test]
+    fn record_sizes_and_zero_sized_category_field() {
+        assert_eq!(std::mem::size_of::<Raw<Wide>>(), 40);
+        assert_eq!(std::mem::size_of::<Raw<Packed>>(), 32);
+        assert_eq!(std::mem::size_of::<Event<Wide>>(), 24);
+        assert_eq!(std::mem::size_of::<Event<Packed>>(), 16);
+        assert_eq!(std::mem::size_of::<Click<Wide>>(), 40);
+        assert_eq!(std::mem::size_of::<Click<Packed>>(), 32);
+    }
+    #[test]
+    fn packed_dedup_keeps_invalid_earliest_across_chunks_and_remaps() {
+        let mut a = LocalEventIds::new(0, 2);
+        let mut b = LocalEventIds::new(3, 2);
+        let ax = a.intern(b"shared-long-event");
+        let bx = b.intern(b"shared-long-event");
+        let ad = a.intern(b"invalid-long-event");
+        let bd = b.intern(b"invalid-long-event");
+        let distinct = b.intern(b"different-long-event");
+        let mut remaps = EventIdRemaps::merge(vec![a.names, vec![], vec![], b.names], 2);
+        remaps.force_fallback_hashes(mix64(u64::MAX));
+        let base = -1000i64;
+        let make = |id, person, ingest, epoch, revenue, category| {
+            let (ts, revenue, category) = Packed::encode(epoch, revenue, category, base);
+            Raw::<Packed> {
+                id,
+                person,
+                ingest,
+                ts,
+                revenue,
+                category,
+            }
+        };
+        let chunks = vec![
+            vec![
+                make(ax, u64::MAX, 50, 5, 10_000_000, 255),
+                make(ad, u64::MAX, 40, 6, 999, 4),
+            ],
+            vec![],
+            vec![make(distinct, u64::MAX, 30, 10, 3, 0)],
+            vec![
+                make(bx, u64::MAX, 10, 7, 1, 255),
+                make(bd, INVALID_PERSON, 1, 9, 888, 3),
+            ],
+        ];
+        for linear in [false, true] {
+            let mut output = vec![Vec::new()];
+            assert!(if linear {
+                dedup_chunks_slots::<true, Packed>(&chunks, &remaps, &[], 0, &mut output)
+            } else {
+                dedup_chunks_slots::<false, Packed>(&chunks, &remaps, &[], 0, &mut output)
+            });
+            sort_events(&mut output[0]);
+            let actual: Vec<_> = output[0]
+                .iter()
+                .map(|e| {
+                    (
+                        Packed::epoch(e.ts, base),
+                        Packed::revenue(e.revenue),
+                        Packed::category(e.revenue, e.category),
+                    )
+                })
+                .collect();
+            assert_eq!(actual, vec![(7, 1, 255), (10, 3, 0)]);
+        }
+        let mut flat = flatten(chunks);
+        let mut output = vec![Vec::new()];
+        dedup_rows_sorted(&mut flat, &remaps, &[], 0, &mut output);
+        sort_events(&mut output[0]);
+        assert_eq!(output[0].len(), 2);
+        assert_eq!(Packed::epoch(output[0][0].ts, base), 7);
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+    #[test]
+    fn compact_nodes_preserve_chains_and_unused_byte_minima() {
+        assert_eq!(std::mem::size_of::<IdentityNode>(), 12);
+        let mut bytes = b"user_id_a,user_id_b\n".to_vec();
+        for i in 0..4096 {
+            bytes.extend_from_slice(format!("user{},user{}\n", i + 1, i).as_bytes());
+        }
+        bytes.extend_from_slice(
+            "user4000,Ω-long-fallback\nΩ-long-fallback,\0unused-minimum\n".as_bytes(),
+        );
+        bytes.extend_from_slice(b"bad,\nself,self\n");
+        let mut map = memmap2::MmapMut::map_anon(bytes.len()).unwrap();
+        map.copy_from_slice(&bytes);
+        let data = [InputFile::Mapped(map.make_read_only().unwrap())];
+        let baseline = identities_wide(&data);
+        let candidate = identities_phased(&data);
+        assert_eq!(baseline.names, candidate.names);
+        assert_eq!(baseline.ids, candidate.ids);
+        assert_eq!(baseline.inline_ids, candidate.inline_ids);
+    }
+}
+
+#[cfg(test)]
+mod vq_packed_layout_tests {
+    use super::*;
+    #[test]
+    fn record_sizes_and_zero_sized_category_field() {
+        assert_eq!(std::mem::size_of::<Raw<Wide>>(), 40);
+        assert_eq!(std::mem::size_of::<Raw<Packed>>(), 32);
+        assert_eq!(std::mem::size_of::<Event<Wide>>(), 24);
+        assert_eq!(std::mem::size_of::<Event<Packed>>(), 16);
+        assert_eq!(std::mem::size_of::<Click<Wide>>(), 40);
+        assert_eq!(std::mem::size_of::<Click<Packed>>(), 32);
+        assert_eq!(std::mem::align_of::<Event<Packed>>(), 8);
+        assert_eq!(std::mem::offset_of!(Event<Packed>, revenue), 0);
+        assert_eq!(std::mem::offset_of!(Event<Packed>, ts), 4);
+        assert_eq!(std::mem::offset_of!(Event<Packed>, person), 8);
+        assert_eq!(std::mem::offset_of!(Event<Wide>, revenue), 0);
+        assert_eq!(std::mem::offset_of!(Event<Wide>, category), 4);
+        assert_eq!(std::mem::offset_of!(Event<Wide>, ts), 8);
+        assert_eq!(std::mem::offset_of!(Event<Wide>, person), 16);
+    }
+    #[test]
+    fn packed_event_sort_preserves_all_person_time_metric_tuples() {
+        let mut events = Vec::new();
+        for person in [u64::MAX, 0, 7, 0x4000_0000_0000_0001, 0x8000_0000_0000_0000] {
+            for ts in [u32::MAX, 0, 17, 17, 0x8000_0000] {
+                for category in [255, 0, 7] {
+                    let (_, revenue, category) =
+                        Packed::encode(i64::from(ts), 10_000_000, category, 0);
+                    events.push(Event::<Packed> {
+                        person,
+                        ts,
+                        revenue,
+                        category,
+                    });
+                }
+            }
+        }
+        let mut expected: Vec<_> = events.iter().map(|e| (e.person, e.ts, e.revenue)).collect();
+        expected.sort_unstable();
+        sort_events(&mut events);
+        assert!(events
+            .windows(2)
+            .all(|w| (w[0].person, w[0].ts) <= (w[1].person, w[1].ts)));
+        let mut actual: Vec<_> = events.iter().map(|e| (e.person, e.ts, e.revenue)).collect();
+        actual.sort_unstable();
+        assert_eq!(actual, expected);
     }
 }

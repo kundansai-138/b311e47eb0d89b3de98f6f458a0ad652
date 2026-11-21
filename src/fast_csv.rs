@@ -49,6 +49,11 @@ pub struct Rows<'a, const N: usize> {
 }
 
 impl<'a, const N: usize> Rows<'a, N> {
+    #[cfg(any(test, feature = "row-csv"))]
+    #[inline]
+    pub fn consumed(&self) -> usize {
+        self.row_start
+    }
     pub fn new(bytes: &'a [u8]) -> Self {
         #[cfg(target_arch = "x86_64")]
         let vector = std::is_x86_feature_detected!("avx2");
@@ -295,54 +300,6 @@ mod tests {
                 check::<1>(&bytes);
                 check::<2>(&bytes);
                 check::<4>(&bytes);
-            }
-        }
-    }
-
-    #[test]
-    #[ignore = "explicit bounded parser microbenchmark"]
-    fn microbench_parser() {
-        use std::{hint::black_box, time::Instant};
-        let bytes = if let Ok(path) = std::env::var("CSV_BENCH_FILE") {
-            // A bounded prefix of a real input file is sufficient to compare
-            // scanners; final unterminated/malformed rows have equal semantics.
-            use std::io::Read;
-            let mut bytes = Vec::new();
-            std::fs::File::open(path)
-                .unwrap()
-                .take(64 * 1024 * 1024)
-                .read_to_end(&mut bytes)
-                .unwrap();
-            bytes
-        } else {
-            b"\"event_123456\",u_123456_2,2026-10-03T23:58:10Z,2026-10-03T23:58:15Z,purchase,\"p_12345\",250\n".repeat(100_000)
-        };
-        let mut expected = None;
-        for round in 0..5 {
-            for candidate in [round % 2 == 0, round % 2 != 0] {
-                let start = Instant::now();
-                let mut checksum = 0usize;
-                let mut count = 0usize;
-                if candidate {
-                    for row in Rows::<7>::new(black_box(&bytes)) {
-                        let row = black_box(row);
-                        count += 1;
-                        checksum =
-                            checksum.wrapping_add(row.iter().map(|f| f.len()).sum::<usize>());
-                    }
-                } else {
-                    for row in reference::Rows::<7>::new(black_box(&bytes)) {
-                        let row = black_box(row);
-                        count += 1;
-                        checksum =
-                            checksum.wrapping_add(row.iter().map(|f| f.len()).sum::<usize>());
-                    }
-                }
-                if let Some(expected) = expected {
-                    assert_eq!((checksum, count), expected);
-                }
-                expected = Some((checksum, count));
-                eprintln!("csv_bench candidate={candidate} round={round} bytes={} seconds={:.6} rows={count} checksum={checksum}", bytes.len(), start.elapsed().as_secs_f64());
             }
         }
     }

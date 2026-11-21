@@ -1,4 +1,4 @@
-name: Compare Linux performance
+name: Compare final optimized engine with submission baseline
 on:
   workflow_dispatch:
 permissions:
@@ -6,7 +6,7 @@ permissions:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -15,26 +15,29 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
-      - name: Build baseline, compact-ID reference, and current images
+      - name: Build exact baseline and production images
         run: |
           mkdir /tmp/shopping-baseline
-          git archive 05a1cf788aa499b9c2d3fbaf2f03a437695d2749 | tar -x -C /tmp/shopping-baseline
+          git archive d52cca7d96130444086754510f8e298d5390eb84 | tar -x -C /tmp/shopping-baseline
           timeout 600 docker build -t shopping-sessions:baseline /tmp/shopping-baseline
-          mkdir /tmp/shopping-inline
-          git archive 6df9854756a575ae73517782a7fa96fae333fd98 .bench/inline | tar -x --strip-components=2 -C /tmp/shopping-inline
-          timeout 600 docker build -t shopping-sessions:inline /tmp/shopping-inline
+          mkdir /tmp/shopping-reference
+          git archive 992b7672b54988c773f6d78cb260b3af9a370c7e .bench/pgo-combined | tar -x -C /tmp/shopping-reference
+          timeout 600 docker build --target pgo -t shopping-sessions:reference /tmp/shopping-reference/.bench/pgo-combined
+          mkdir benchmark-results
+          started=$(date +%s)
           timeout 600 docker build -t shopping-sessions:optimized .
-      - name: Generate twenty-million-event dataset
+          echo "Production build seconds: $(($(date +%s)-started))" | tee benchmark-results/build-time.txt
+          docker image inspect shopping-sessions:optimized --format '{{.Size}}' > benchmark-results/image-size.txt
+      - name: Generate official twenty-million-event input
         run: |
           cargo build --release --locked --offline --manifest-path tests/generator/Cargo.toml
           tests/generator/target/release/generate --seed 818 --events 20000000 --clicks 5000000 --threads 4 --output /tmp/shopping-data
-      - name: Alternate five runs per image and compare all output rows
+      - name: Alternate five full runs and compare every output row
         run: |
-          mkdir benchmark-results
           lscpu > benchmark-results/cpu.txt
           python tests/benchmark.py /tmp/shopping-data benchmark-results --repeats 5
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: linux-benchmark
+          name: round3-linux-production
           path: benchmark-results/

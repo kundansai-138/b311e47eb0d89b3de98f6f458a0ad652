@@ -22,10 +22,17 @@ bytes = "1.10"
 memmap2 = "=0.9.12"
 
 [features]
-default = ["fast-csv", "fast-hash", "fast-digits", "cached-time", "trusted-ingest"]
+default = ["fast-csv", "fast-hash", "fast-digits", "cached-time", "trusted-ingest", "row-csv", "swar-clock", "swar-digits", "vqsort"]
 fast-csv = []
 fast-hash = []
 fast-digits = []
 
 cached-time = []
 trusted-ingest = ["cached-time"]
+
+row-csv = ["fast-csv"]
+swar-clock = ["cached-time"]
+
+swar-digits = ["fast-digits"]
+
+vqsort = []

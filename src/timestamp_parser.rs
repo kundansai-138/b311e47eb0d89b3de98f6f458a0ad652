@@ -42,15 +42,24 @@ impl TimestampParser {
         if b[4] != b'-' {
             return digits(b);
         }
-        if b[10] != b'T' || b[13] != b':' || b[16] != b':' {
+        if b[10] != b'T' {
             return None;
         }
-        let h = pair(b, 11)?;
-        let m = pair(b, 14)?;
-        let s = pair(b, 17)?;
-        if h > 23 || m > 59 || s > 59 {
-            return None;
-        }
+        #[cfg(feature = "swar-clock")]
+        let time = crate::clock_word::parse(u64::from_le_bytes(b[11..19].try_into().unwrap()))?;
+        #[cfg(not(feature = "swar-clock"))]
+        let time = {
+            if b[13] != b':' || b[16] != b':' {
+                return None;
+            }
+            let h = pair(b, 11)?;
+            let m = pair(b, 14)?;
+            let s = pair(b, 17)?;
+            if h > 23 || m > 59 || s > 59 {
+                return None;
+            }
+            (h * 3600 + m * 60 + s) * 1000
+        };
         let offset = if b.len() == 20 {
             if b[19] != b'Z' {
                 return None;
@@ -67,7 +76,7 @@ impl TimestampParser {
             }
             (h * 60 + m) * 60_000 * if b[19] == b'+' { 1 } else { -1 }
         };
-        Some(self.date_base(b)? + (h * 3600 + m * 60 + s) * 1000 - offset)
+        Some(self.date_base(b)? + time - offset)
     }
 
     #[cfg(not(feature = "trusted-ingest"))]
@@ -148,6 +157,7 @@ impl TimestampParser {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[cfg(feature = "cached-time")]
@@ -257,46 +267,6 @@ mod tests {
                     }
                 }
             }
-        }
-    }
-
-    #[test]
-    #[ignore = "explicit bounded timestamp microbenchmark"]
-    fn microbench_timestamp_parser() {
-        use std::hint::black_box;
-        use std::time::Instant;
-        let values: Vec<_> = (0..4096)
-            .map(|i| {
-                format!(
-                    "2028-02-{:02}T{:02}:{:02}:{:02}Z",
-                    1 + i % 28,
-                    i % 24,
-                    i % 60,
-                    (i * 7) % 60
-                )
-            })
-            .collect();
-        for mode in ["reference", "cached", "ingest"] {
-            let mut parser = TimestampParser::new();
-            let start = Instant::now();
-            let mut sum = 0i64;
-            for _ in 0..100 {
-                for value in &values {
-                    let bytes = black_box(value.as_bytes());
-                    let parsed = match mode {
-                        "reference" => timestamp(bytes),
-                        "cached" => parser.parse(bytes),
-                        _ => parser.ingest(bytes),
-                    };
-                    sum = sum.wrapping_add(black_box(parsed.unwrap()));
-                }
-            }
-            eprintln!(
-                "timestamp_microbench {mode}: rows={} seconds={:.6} checksum={}",
-                values.len() * 100,
-                start.elapsed().as_secs_f64(),
-                black_box(sum)
-            );
         }
     }
 }

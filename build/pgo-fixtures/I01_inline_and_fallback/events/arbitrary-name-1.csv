@@ -1,0 +1,4 @@
+event_id,user_id,ts,ingest_ts,event_type,product_id,price_cents
+e8,"000","2026-10-02T00:00:00Z","2026-10-02T00:00:00Z","purchase",p1,"9"
+"e3","AAAAAAAAA","2026-10-02T00:00:00Z","2026-10-02T00:00:00Z",purchase,p1,4
+e9," 	",2026-10-02T00:00:00Z,"2026-10-02T00:00:00Z",purchase,"p1",10

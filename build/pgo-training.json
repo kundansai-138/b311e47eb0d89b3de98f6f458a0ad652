@@ -1,0 +1,24 @@
+{
+  "source": "clean round3-clean-base snapshot; selected native source copy pending final selection",
+  "training_seeds": [
+    17,
+    173,
+    1729
+  ],
+  "events_per_seed": 500000,
+  "clicks_per_seed": 125000,
+  "supplied_fixture_count": 36,
+  "extra_input_fixtures": [
+    "P01_catalog_256",
+    "P02_catalog_257",
+    "P03_span_4294967295",
+    "P04_span_4294967296",
+    "P05_negative_epoch_window",
+    "E01_inline_event_lengths_and_all_bits",
+    "E02_fallback_event_exact_names_and_tombstones",
+    "I01_inline_and_fallback",
+    "I02_cross_encoding_aliases",
+    "I03_repeated_names_and_invalid_dedup"
+  ],
+  "extra_input_bytes": 43871
+}

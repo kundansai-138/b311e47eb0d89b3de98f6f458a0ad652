@@ -40,7 +40,7 @@ def main():
         prefix = "cgroup_memory_peak_bytes="
         peak = next(int(line[len(prefix):]) for line in log.read_text().splitlines() if line.startswith(prefix))
         subprocess.run(["python", "tests/check_scale.py", str(output)], check=True)
-        record = {"seconds": (end-start).total_seconds(), "cpu_quota": 4, "worker_threads": 8,
+        record = {"candidate_commit": os.environ.get("GITHUB_SHA", "local"), "seconds": (end-start).total_seconds(), "cpu_quota": 4, "worker_threads": 8,
                   "memory_limit_bytes": 12*1024**3, "cgroup_memory_peak_bytes": peak,
                   "baseline_digest_match": True, "generated_events": 60_000_000, "generated_clicks": 15_000_000,
                   "seed": 42, "out_plus_scratch_bytes": sum(p.stat().st_size for d in [output,scratch] for p in d.rglob("*") if p.is_file())}
