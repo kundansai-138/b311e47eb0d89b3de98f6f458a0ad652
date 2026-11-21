@@ -1,12 +1,14 @@
 # Shopping Sessions
 
-Public submission repository: https://github.com/kundansai-138/shopping-sessions
+Public submission repository: https://github.com/kundansai-138/b311e47eb0d89b3de98f6f458a0ad652
 
-An implementation of scorer `shopping-sessions-4`, derived from the supplied Polars starter. A native Rust engine handles parsing, aggregation, and direct Apache Parquet output. Immutable input files are memory-mapped, and an AVX2 scanner identifies CSV delimiters and quotes in one pass. The supplied 36 fixtures and scorer-style Docker wrapper are retained.
+An implementation of scorer `shopping-sessions-4`, derived from the supplied Polars starter. A Rust engine handles parsing, aggregation, and direct Apache Parquet output; a checked C++ AVX2 kernel accelerates packed-event sorting. Immutable input files are memory-mapped, and an AVX2 scanner identifies CSV delimiters and quotes in one pass. The supplied 36 fixtures and scorer-style Docker wrapper are retained.
 
 ## Build and validate the submission
 
-The repository root contains the Dockerfile. Docker builds need network access to obtain base images and the Cargo.lock-pinned Rust dependencies. Execution needs no network or Python. Python/PyArrow are used only by the external validation scripts.
+The repository root contains the Dockerfile. The default image uses Rust 1.90.0 profile-guided compilation: an instrumented build processes three independently generated training datasets and small correctness fixtures, then a fresh optimized executable is compiled with the merged profile. Training inputs, profiles, compilers and test outputs remain in builder stages. The runtime contains only the executable and launcher on Debian slim.
+
+Builds need network access for base images, pinned Cargo dependencies and the matching LLVM profile tool. The vendored C++ kernel needs no download. Execution needs no network or Python. Python/PyArrow are used only by external validation scripts. `docker build --target normal` produces an ordinary release control from the same source.
 
 ```sh
 docker buildx build --platform linux/amd64 --load -t shopping-sessions:latest .
@@ -14,6 +16,8 @@ python3 -m pip install -r requirements.txt
 python3 scripts/run_fixtures.py fixtures -- sh scripts/docker_run.sh
 python3 tests/generate_cases.py --output scratch/adversarial
 python3 scripts/run_fixtures.py scratch/adversarial -- sh scripts/docker_run.sh
+python3 tests/generate_layout_cases.py --output scratch/layout-cases --writer
+CPUS=1 python3 scripts/run_fixtures.py scratch/layout-cases -- sh scripts/docker_run.sh
 ```
 
 The wrapper applies a read-only root, UID 1000, no network, a 64 MB `/tmp`, eight CPUs, 24 GB memory with no swap, and separate data/output/scratch mounts. Override the CPU quota with `CPUS`, memory with `MEM`, and worker count with `WORKERS` (defaults to the integer CPU quota). The GitHub Actions workflow builds and tests the Linux container using smaller quotas; a successful local native run alone does not certify the container.
@@ -33,7 +37,7 @@ Use a fresh output folder on each run. The engine rejects existing output Parque
 
 ## Run directly without Docker
 
-Requires Rust 1.90 or newer. Fetch dependencies once during the build; the executable runs offline and writes Parquet directly. Python 3.12 with `requirements.txt` is needed only for comparison/fixture scripts.
+Requires Rust 1.90 or newer, plus g++ with C++20 support and ar on Linux x86-64. Fetch dependencies once during the build; the executable runs offline and writes Parquet directly. Python 3.12 with `requirements.txt` is needed only for comparison/fixture scripts.
 
 ```sh
 cargo build --release --locked
@@ -50,25 +54,29 @@ python3 tests/check_native_writer.py scratch/writer-smoke
 
 The optional `pipeline/pipeline.py` convenience launcher executes the native binary from `target/release`, or from the absolute path in `SHOPPING_ENGINE`. It does not import Arrow or export intermediate files.
 
-On Windows PowerShell, set the same environment variables with `$env:NAME = 'value'`, and use `target/release/shopping-sessions.exe`.
+Windows uses the validated Rust sort fallback. On Windows PowerShell, set the same environment variables with `$env:NAME = 'value'`, and use `target/release/shopping-sessions.exe`.
 
 ## Processing strategy
 
-1. Map each immutable input file once and distribute newline-aligned chunks among workers. Resolve linked identities with union by size and path compression, tracking the bytewise minimum across every linked ID, including unused aliases.
+1. Map each immutable input file once and distribute newline-aligned chunks among workers. Resolve linked identities in separate interning, union and canonicalization passes. Checked compact union metadata, path compression and cached canonical keys preserve the bytewise minimum across every linked ID, including unused aliases.
 2. Represent IDs of one to nine ASCII bytes exactly in a reversible 64-bit key. Length markers preserve NULs, leading zeroes, whitespace, and case. Longer/non-ASCII IDs use exact byte-keyed dictionaries and worker-to-global remaps; neither path assumes a generator-specific ID format.
-3. Scan commas, LF bytes, and quotes together using AVX2 with a tested scalar fallback. Keep only the numeric fields needed downstream. Non-purchase rows skip price conversion and product lookup. Invalid event copies remain tombstones until global earliest-ingest deduplication. Compact hash slots reference worker-owned records directly, avoiding a complete raw-record copy; exact ID tokens decide equality even when hashes collide.
-4. Cache strictly validated calendar dates using all ten original date bytes. Event/click timestamps retain full validation; only `ingest_ts`, guaranteed valid F1 by the rules, uses direct time decoding. Repartition survivors by canonical person, then sort by exact person key and timestamp. Sessions split at gaps greater than 30 minutes. Click ties retain the smallest original bytewise click ID.
+3. Scan commas, LF bytes, and quotes with AVX2 whole-row masks, retaining the exact streaming/scalar parser for long rows, tails and unsupported CPUs. Keep only the numeric fields needed downstream. Non-purchase rows skip price conversion and product lookup. Invalid event copies remain tombstones until global earliest-ingest deduplication. Compact hash slots reference worker-owned records directly, avoiding a complete raw-record copy; exact ID tokens decide equality even when hashes collide.
+4. Cache strictly validated calendar dates using all ten original date bytes. Decode decimal and clock digits in bounded machine-word groups, preserving arbitrary leading zeroes and overflow checks. Event/click timestamps retain full validation; only `ingest_ts`, guaranteed valid F1 by the rules, uses direct time decoding. Repartition survivors by canonical person, then sort by exact person key and timestamp. Packed events use the pinned Google Highway C++ AVX2 sorter after CPU, layout and alignment checks; Wide records and unsupported platforms use Rust sorting. Sessions split at gaps greater than 30 minutes. Click ties retain the smallest original bytewise click ID.
 5. Sweep clicks with a rolling seven-day window and per-campaign counts. Each active campaign contributes one assist per session; no session-to-click Cartesian/range join is materialized.
-6. Aggregate campaign days in dense counters when the manifest/catalog dimensions are small, otherwise use sparse counters. Write Parquet parts directly from parallel partition workers, using bounded 131,072-row groups, explicit DATE and nullable category types, and plain uncompressed encoding without dictionaries or statistics. No intermediate column files are needed.
+6. Reuse one campaign accumulator and one Parquet writer per worker across its partitions. Campaign counters are dense when the manifest/catalog dimensions are small and sparse otherwise. Write Parquet directly, using bounded 131,072-row groups, explicit DATE and nullable category types, and plain uncompressed encoding without dictionaries or statistics. No intermediate column files are needed.
 
-Parsed event records occupy 40 bytes, surviving event records 24 bytes, and click records 40 bytes on x86-64. Large inputs use up to 16 independent partitions per worker; tiny inputs use fewer. Capacity estimates affect allocation only, and all buffers can grow. Read-only CSV mappings remain valid throughout native execution. This is an in-memory implementation; see `PERFORMANCE.md` for the controlled Linux comparison and `VALIDATION.md` for correctness and resource checks.
+When the complete event-plus-click-lookback domain fits u32 milliseconds and the catalog has at most 256 categories including unknown, parsed events occupy 32 bytes, surviving events 16 bytes, and clicks 32 bytes on x86-64. Wider domains or larger catalogs automatically use the exact 40/24/40-byte layout. Ingest timestamps remain i64 in both paths; the compact layout never changes deduplication or validation semantics. Large inputs use up to 16 independent partitions per worker; tiny inputs use fewer. Capacity estimates affect allocation only, and all buffers can grow. Read-only CSV mappings remain valid throughout native execution. This is an in-memory implementation; see `PERFORMANCE.md` for the controlled Linux comparison and `VALIDATION.md` for correctness and resource checks.
 
 ## Files
 
 - `src/main.rs`: native parsing, identity resolution, deduplication, sessionization, and aggregation.
-- `src/fast_csv.rs`: fused SIMD/scalar strict CSV scanner and differential tests.
+- `src/row_csv.rs` and `src/fast_csv.rs`: whole-row masks and exact streaming/scalar CSV parsing with differential tests.
 - `src/inline_person.rs` and `src/event_ids.rs`: reversible ID keys and exact fallback remapping.
-- `src/timestamp_parser.rs`: strictly keyed calendar cache and ingest fast path.
+- `src/timestamp_parser.rs`, `src/clock_word.rs`, `src/decimal_word.rs`: exact calendar, clock and decimal decoding.
+- `src/record_layout.rs`: checked compact/full-width record layouts.
+- `src/simd_sort.rs`, `native/`, `build.rs`: checked Rust/C++ sorting boundary.
+- `vendor/highway/`: pinned, unmodified Highway headers and license.
+- `build/build.sh`: reproducible unit checks, profile training and optimized compilation.
 - `src/parquet_output.rs`: bounded-memory direct Parquet writers.
 - `pipeline/pipeline.py`: optional native executable launcher.
 - `rules.md`: supplied authoritative rules.

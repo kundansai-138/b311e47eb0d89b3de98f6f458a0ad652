@@ -1,0 +1,13 @@
+{
+  "candidate_commit": "bc1ffbcec5dd6620b585d0832ffb29635fa7ad24",
+  "seconds": 11.086108,
+  "cpu_quota": 4,
+  "worker_threads": 8,
+  "memory_limit_bytes": 12884901888,
+  "cgroup_memory_peak_bytes": 4597018624,
+  "baseline_digest_match": true,
+  "generated_events": 60000000,
+  "generated_clicks": 15000000,
+  "seed": 42,
+  "out_plus_scratch_bytes": 287359560
+}

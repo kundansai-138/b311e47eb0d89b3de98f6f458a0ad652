@@ -1,0 +1,118 @@
+{
+  "control_variant": "combined",
+  "control_source_commit": "992b7672b54988c773f6d78cb260b3af9a370c7e",
+  "previous_submission_commit": "d52cca7d96130444086754510f8e298d5390eb84",
+  "candidate_commit": "b0d97ab017f9430ec94fd60967244fa08821760e",
+  "threads": 8,
+  "cpu_quota": 4,
+  "memory_limit_bytes": 12884901888,
+  "runs": [
+    {
+      "variant": "combined",
+      "repetition": 0,
+      "seconds": 3.099927
+    },
+    {
+      "variant": "vqsort",
+      "repetition": 0,
+      "seconds": 2.615421
+    },
+    {
+      "variant": "vqsort-rust",
+      "repetition": 0,
+      "seconds": 2.677709
+    },
+    {
+      "variant": "digits",
+      "repetition": 0,
+      "seconds": 2.670224
+    },
+    {
+      "variant": "writer",
+      "repetition": 0,
+      "seconds": 2.645577
+    },
+    {
+      "variant": "clicks",
+      "repetition": 0,
+      "seconds": 2.692248
+    },
+    {
+      "variant": "vqsort",
+      "repetition": 1,
+      "seconds": 2.725739
+    },
+    {
+      "variant": "vqsort-rust",
+      "repetition": 1,
+      "seconds": 2.663978
+    },
+    {
+      "variant": "digits",
+      "repetition": 1,
+      "seconds": 2.784589
+    },
+    {
+      "variant": "writer",
+      "repetition": 1,
+      "seconds": 2.657727
+    },
+    {
+      "variant": "clicks",
+      "repetition": 1,
+      "seconds": 2.655374
+    },
+    {
+      "variant": "combined",
+      "repetition": 1,
+      "seconds": 3.138382
+    },
+    {
+      "variant": "vqsort-rust",
+      "repetition": 2,
+      "seconds": 2.716636
+    },
+    {
+      "variant": "digits",
+      "repetition": 2,
+      "seconds": 2.621782
+    },
+    {
+      "variant": "writer",
+      "repetition": 2,
+      "seconds": 2.62141
+    },
+    {
+      "variant": "clicks",
+      "repetition": 2,
+      "seconds": 2.680423
+    },
+    {
+      "variant": "combined",
+      "repetition": 2,
+      "seconds": 2.677589
+    },
+    {
+      "variant": "vqsort",
+      "repetition": 2,
+      "seconds": 2.650334
+    }
+  ],
+  "medians_seconds": {
+    "combined": 3.099927,
+    "vqsort": 2.650334,
+    "vqsort-rust": 2.677709,
+    "digits": 2.670224,
+    "writer": 2.645577,
+    "clicks": 2.680423
+  },
+  "speedups": {
+    "combined": 1.0,
+    "vqsort": 1.1696363552669211,
+    "vqsort-rust": 1.1576788217091551,
+    "digits": 1.160923952447435,
+    "writer": 1.1717394730903694,
+    "clicks": 1.1565066409294356
+  },
+  "exact_output_match": true
+}

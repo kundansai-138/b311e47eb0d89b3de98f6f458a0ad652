@@ -1,3 +1,29 @@
+<!-- final-round3-report:begin -->
+# Final optimized runtime validation
+
+Runtime `bc1ffbcec5dd6620b585d0832ffb29635fa7ad24` passed the [final Linux container CI](https://github.com/kundansai-138/b311e47eb0d89b3de98f6f458a0ad652/actions/runs/44859271562), [controlled benchmark](https://github.com/kundansai-138/b311e47eb0d89b3de98f6f458a0ad652/actions/runs/44859291731) and [60M regression](https://github.com/kundansai-138/b311e47eb0d89b3de98f6f458a0ad652/actions/runs/44859294051).
+
+- Linux native tests: 52 default-feature and 31 no-default-feature correctness tests. The Windows build passed 49 default-feature tests.
+- The assembled native candidate passed 101 exact checks, including fixture repetitions and the public development answer comparison.
+- Container CI covered 94 unique fixtures: 36 supplied, 44 general adversarial, five small exact-ID cases, one large cross-worker ID case, and eight layout/writer boundary cases. The six ID cases were also checked with eight workers after their one-worker runs.
+- The boundary cases cover category counts, exact 32-bit timestamp limits, negative epochs, the complete seven-day click lookback and automatic wide-layout fallback. The 131,077-row writer case matches the independent oracle and, with one worker, produces row groups of 131,072 and 5 rows in one user file.
+- Public development output matched the supplied answer: 117,038 user rows and 27,400 campaign rows, with the required schemas and unique keys.
+- Five rotated 20M timing runs per image; the complete output from the first run of each image matched across the previous submission, common PGO reference and final runtime.
+- The full 60M/15M run completed in 11.086108s under a hard 12 GiB limit. Every output row matched the retained baseline digests; peak cgroup memory was 4,597,018,624 bytes.
+
+The exact-ID regressions include long and Unicode identifiers, NUL/DEL and 9/10-byte boundaries, shared fallback identifiers across files and workers, unused byte-minimum aliases and invalid earliest duplicates. Hash collisions never establish identity. SIMD/scalar parser checks and native-sort comparison tests preserve strict CSV, calendar, numeric and ordering behavior. Packed representations are selected only after checked domain bounds, and click eligibility still includes the full attribution window.
+
+The PGO Docker build runs default and no-default unit tests before instrumentation, trains only on fresh build-local data, and checks the final executable's shared-library dependencies. The runtime runs offline as UID 1000 with a read-only root and 64 MiB `/tmp`; dependency downloads and native compiler tools are confined to image construction. The 290 original supplied fixture files remain unchanged. [Native correctness report](validation/native-round3-tests.json).
+
+Final evidence: [controlled benchmark](validation/linux-round3-benchmark.json) and [60M regression](validation/linux-round3-scale.json). Exploratory evidence: [linux-round3-combined.json](validation/linux-round3-combined.json), [linux-round3-isolated.json](validation/linux-round3-isolated.json), [linux-round3-kernels-initial.json](validation/linux-round3-kernels-initial.json), [linux-round3-kernels-repeat.json](validation/linux-round3-kernels-repeat.json). The exploratory runs used separate runner sessions and are retained as development history; their absolute timings are not combined with the final comparison.
+
+See [PERFORMANCE.md](PERFORMANCE.md) for the same-run timings and resource conditions. These checks do not replace the organizer's hidden scorer or establish a new leaderboard score.
+<!-- final-round3-report:end -->
+
+---
+
+## Historical records
+
 # Current compact pipeline validation
 
 Runtime `fca520dab97a01fdc38ad68eeb6916175c4ce738` passed:

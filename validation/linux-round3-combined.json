@@ -1,0 +1,116 @@
+{
+  "baseline_commit": "d52cca7d96130444086754510f8e298d5390eb84",
+  "candidate_commit": "992b7672b54988c773f6d78cb260b3af9a370c7e",
+  "threads": 8,
+  "cpu_quota": 4,
+  "memory_limit_bytes": 12884901888,
+  "runs": [
+    {
+      "variant": "baseline",
+      "repetition": 0,
+      "seconds": 3.267382
+    },
+    {
+      "variant": "combined",
+      "repetition": 0,
+      "seconds": 2.742989
+    },
+    {
+      "variant": "pgo",
+      "repetition": 0,
+      "seconds": 2.631117
+    },
+    {
+      "variant": "overlap",
+      "repetition": 0,
+      "seconds": 2.782899
+    },
+    {
+      "variant": "overlap4",
+      "repetition": 0,
+      "seconds": 2.764557
+    },
+    {
+      "variant": "partition",
+      "repetition": 0,
+      "seconds": 2.725015
+    },
+    {
+      "variant": "combined",
+      "repetition": 1,
+      "seconds": 2.759512
+    },
+    {
+      "variant": "pgo",
+      "repetition": 1,
+      "seconds": 2.642615
+    },
+    {
+      "variant": "overlap",
+      "repetition": 1,
+      "seconds": 2.79283
+    },
+    {
+      "variant": "overlap4",
+      "repetition": 1,
+      "seconds": 2.778228
+    },
+    {
+      "variant": "partition",
+      "repetition": 1,
+      "seconds": 2.750208
+    },
+    {
+      "variant": "baseline",
+      "repetition": 1,
+      "seconds": 3.361137
+    },
+    {
+      "variant": "pgo",
+      "repetition": 2,
+      "seconds": 2.724299
+    },
+    {
+      "variant": "overlap",
+      "repetition": 2,
+      "seconds": 2.831459
+    },
+    {
+      "variant": "overlap4",
+      "repetition": 2,
+      "seconds": 2.814738
+    },
+    {
+      "variant": "partition",
+      "repetition": 2,
+      "seconds": 2.760508
+    },
+    {
+      "variant": "baseline",
+      "repetition": 2,
+      "seconds": 3.213649
+    },
+    {
+      "variant": "combined",
+      "repetition": 2,
+      "seconds": 2.762741
+    }
+  ],
+  "medians_seconds": {
+    "baseline": 3.267382,
+    "combined": 2.759512,
+    "pgo": 2.642615,
+    "overlap": 2.79283,
+    "overlap4": 2.778228,
+    "partition": 2.750208
+  },
+  "speedups": {
+    "baseline": 1.0,
+    "combined": 1.1840434105740436,
+    "pgo": 1.2364199855067801,
+    "overlap": 1.169917968512226,
+    "overlap4": 1.1760669030763493,
+    "partition": 1.188049049380992
+  },
+  "exact_output_match": true
+}

@@ -1,3 +1,33 @@
+<!-- final-round3-report:begin -->
+# Final checked layouts, native sorting and PGO
+
+Runtime `bc1ffbcec5dd6620b585d0832ffb29635fa7ad24` was compared with the previous submission `d52cca7d96130444086754510f8e298d5390eb84` and the common round-three PGO reference `992b7672b54988c773f6d78cb260b3af9a370c7e` on one GitHub Actions Linux runner. Official-generator seed 818 produced 20,000,000 events and 5,000,000 clicks. Five runs per image rotated order, with a four-CPU quota, eight worker threads, a hard 12 GiB memory limit and no swap or network. Each container ran as UID 1000 with a read-only root and 64 MiB `/tmp`. Docker start-to-finish timings include processing, output writing and process exit.
+
+| Version | Run 1 | Run 2 | Run 3 | Run 4 | Run 5 | Median |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Previous submission `d52cca7` | 3.705568s | 3.546410s | 3.731264s | 3.630974s | 3.586045s | **3.630974s** |
+| Common round-three PGO reference `992b767` | 2.875585s | 2.838834s | 2.922628s | 2.849632s | 2.836242s | **2.849632s** |
+| Final optimized runtime `bc1ffbc` | 2.842747s | 2.784478s | 2.845868s | 2.831043s | 2.764465s | **2.831043s** |
+
+The final median is **22.03% lower than the previous submission (1.283x speedup)** and **0.65% lower than the common PGO reference (1.007x speedup)**. These reductions use only the same-run medians above. The small difference from the PGO reference measures the combined implementation, not each component independently. Every output row matched across all three images. [Final controlled benchmark](https://github.com/kundansai-138/b311e47eb0d89b3de98f6f458a0ad652/actions/runs/44859291731).
+
+Checked timestamp and category domains select 32-byte raw records, 16-byte surviving events and 32-byte clicks. The check includes the full seven-day click lookback; wider domains automatically use the original 40/24/40-byte representation. Exact inline IDs, full-byte fallback dictionaries, invalid-earliest tombstones and bytewise canonical-name minima remain intact.
+
+The implementation adds phased identity construction, whole-row CSV scanning, word-at-a-time clock and decimal parsing, reusable campaign reducers and one bounded Parquet writer per worker. A vendored C++ AVX2 sorter handles eligible packed records after runtime feature checks; the Rust sort remains the fallback. Build-time profile-guided optimization uses Rust 1.90.0, fixed generated training seeds and small boundary fixtures, with fresh profiles and separate uninstrumented unit checks. The deployed image contains no training data or Python runtime.
+
+The production image build step took **113 seconds**; the resulting image was **28,818,074 bytes (27.48 MiB)**. These are the recorded workflow build and image measurements; the workflow enforces a 600-second build limit.
+
+The independent seed 42 run with 60,000,000 events and 15,000,000 clicks completed in **11.086108s**, using four CPUs, eight workers and the same hard 12 GiB limit. Peak cgroup memory was **4,597,018,624 bytes (4.28 GiB)**; output plus scratch used **287,359,560 bytes**. Every output row matched the retained baseline's partition-independent digests. This is a resource and correctness regression, not a controlled 60M speedup comparison. [Final scale run](https://github.com/kundansai-138/b311e47eb0d89b3de98f6f458a0ad652/actions/runs/44859294051).
+
+Final evidence: [controlled benchmark](validation/linux-round3-benchmark.json) and [60M regression](validation/linux-round3-scale.json). Exploratory evidence: [linux-round3-combined.json](validation/linux-round3-combined.json), [linux-round3-isolated.json](validation/linux-round3-isolated.json), [linux-round3-kernels-initial.json](validation/linux-round3-kernels-initial.json), [linux-round3-kernels-repeat.json](validation/linux-round3-kernels-repeat.json). The exploratory runs used separate runner sessions and are retained as development history; their absolute timings are not combined with the final comparison.
+
+The user reported a 2.23-second leaderboard result for the preceding submission. The measurements here come from the four-CPU GitHub runner and do not establish a new leaderboard score.
+<!-- final-round3-report:end -->
+
+---
+
+## Historical records
+
 # Compact exact IDs and parallel reduction
 
 Runtime commit `fca520dab97a01fdc38ad68eeb6916175c4ce738` was compared with the previously submitted `05a1cf788aa499b9c2d3fbaf2f03a437695d2749` and the earlier compact-ID candidate on one GitHub Actions Linux runner. The official generator produced seed 818 with 20,000,000 events and 5,000,000 clicks. Five runs per image rotated order; all used eight worker threads, a four-CPU quota, 12 GiB memory, no swap/network, UID 1000, a read-only root and 64 MiB `/tmp`. Docker start-to-finish times include output writing and process exit.

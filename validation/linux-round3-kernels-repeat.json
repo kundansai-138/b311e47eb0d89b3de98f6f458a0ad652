@@ -1,0 +1,238 @@
+{
+  "control_variant": "combined",
+  "control_source_commit": "992b7672b54988c773f6d78cb260b3af9a370c7e",
+  "previous_submission_commit": "d52cca7d96130444086754510f8e298d5390eb84",
+  "candidate_commit": "6242d875e8f5bb2716596103f64dde1a133427d3",
+  "threads": 8,
+  "cpu_quota": 4,
+  "memory_limit_bytes": 12884901888,
+  "runs": [
+    {
+      "variant": "combined",
+      "repetition": 0,
+      "seconds": 2.391319
+    },
+    {
+      "variant": "vqsort",
+      "repetition": 0,
+      "seconds": 2.373688
+    },
+    {
+      "variant": "vqsort-rust",
+      "repetition": 0,
+      "seconds": 2.416515
+    },
+    {
+      "variant": "digits",
+      "repetition": 0,
+      "seconds": 2.397278
+    },
+    {
+      "variant": "writer",
+      "repetition": 0,
+      "seconds": 2.351979
+    },
+    {
+      "variant": "clicks",
+      "repetition": 0,
+      "seconds": 2.374986
+    },
+    {
+      "variant": "vqsort",
+      "repetition": 1,
+      "seconds": 2.454403
+    },
+    {
+      "variant": "vqsort-rust",
+      "repetition": 1,
+      "seconds": 2.435991
+    },
+    {
+      "variant": "digits",
+      "repetition": 1,
+      "seconds": 2.482837
+    },
+    {
+      "variant": "writer",
+      "repetition": 1,
+      "seconds": 2.542811
+    },
+    {
+      "variant": "clicks",
+      "repetition": 1,
+      "seconds": 2.479313
+    },
+    {
+      "variant": "combined",
+      "repetition": 1,
+      "seconds": 2.457899
+    },
+    {
+      "variant": "vqsort-rust",
+      "repetition": 2,
+      "seconds": 2.406622
+    },
+    {
+      "variant": "digits",
+      "repetition": 2,
+      "seconds": 2.401374
+    },
+    {
+      "variant": "writer",
+      "repetition": 2,
+      "seconds": 2.438193
+    },
+    {
+      "variant": "clicks",
+      "repetition": 2,
+      "seconds": 2.433676
+    },
+    {
+      "variant": "combined",
+      "repetition": 2,
+      "seconds": 2.428486
+    },
+    {
+      "variant": "vqsort",
+      "repetition": 2,
+      "seconds": 2.436201
+    },
+    {
+      "variant": "digits",
+      "repetition": 3,
+      "seconds": 2.390021
+    },
+    {
+      "variant": "writer",
+      "repetition": 3,
+      "seconds": 2.427748
+    },
+    {
+      "variant": "clicks",
+      "repetition": 3,
+      "seconds": 2.448994
+    },
+    {
+      "variant": "combined",
+      "repetition": 3,
+      "seconds": 2.467557
+    },
+    {
+      "variant": "vqsort",
+      "repetition": 3,
+      "seconds": 2.429096
+    },
+    {
+      "variant": "vqsort-rust",
+      "repetition": 3,
+      "seconds": 2.457498
+    },
+    {
+      "variant": "writer",
+      "repetition": 4,
+      "seconds": 2.46521
+    },
+    {
+      "variant": "clicks",
+      "repetition": 4,
+      "seconds": 2.428184
+    },
+    {
+      "variant": "combined",
+      "repetition": 4,
+      "seconds": 2.530105
+    },
+    {
+      "variant": "vqsort",
+      "repetition": 4,
+      "seconds": 2.365654
+    },
+    {
+      "variant": "vqsort-rust",
+      "repetition": 4,
+      "seconds": 2.450802
+    },
+    {
+      "variant": "digits",
+      "repetition": 4,
+      "seconds": 2.448958
+    },
+    {
+      "variant": "clicks",
+      "repetition": 5,
+      "seconds": 2.413273
+    },
+    {
+      "variant": "combined",
+      "repetition": 5,
+      "seconds": 2.457367
+    },
+    {
+      "variant": "vqsort",
+      "repetition": 5,
+      "seconds": 2.383026
+    },
+    {
+      "variant": "vqsort-rust",
+      "repetition": 5,
+      "seconds": 2.454912
+    },
+    {
+      "variant": "digits",
+      "repetition": 5,
+      "seconds": 2.441843
+    },
+    {
+      "variant": "writer",
+      "repetition": 5,
+      "seconds": 2.469261
+    },
+    {
+      "variant": "combined",
+      "repetition": 6,
+      "seconds": 2.435168
+    },
+    {
+      "variant": "vqsort",
+      "repetition": 6,
+      "seconds": 2.517646
+    },
+    {
+      "variant": "vqsort-rust",
+      "repetition": 6,
+      "seconds": 2.480884
+    },
+    {
+      "variant": "digits",
+      "repetition": 6,
+      "seconds": 2.434051
+    },
+    {
+      "variant": "writer",
+      "repetition": 6,
+      "seconds": 2.429611
+    },
+    {
+      "variant": "clicks",
+      "repetition": 6,
+      "seconds": 2.424295
+    }
+  ],
+  "medians_seconds": {
+    "combined": 2.457367,
+    "vqsort": 2.429096,
+    "vqsort-rust": 2.450802,
+    "digits": 2.434051,
+    "writer": 2.438193,
+    "clicks": 2.428184
+  },
+  "speedups": {
+    "combined": 1.0,
+    "vqsort": 1.0116384860870054,
+    "vqsort-rust": 1.0026787149675902,
+    "digits": 1.009579092631995,
+    "writer": 1.0078640206087048,
+    "clicks": 1.0120184467074984
+  },
+  "exact_output_match": true
+}

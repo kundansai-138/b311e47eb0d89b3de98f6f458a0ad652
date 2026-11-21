@@ -1,0 +1,97 @@
+{
+  "baseline_commit": "d52cca7d96130444086754510f8e298d5390eb84",
+  "reference_commit": "992b7672b54988c773f6d78cb260b3af9a370c7e",
+  "reference_context": ".bench/pgo-combined",
+  "candidate_commit": "bc1ffbcec5dd6620b585d0832ffb29635fa7ad24",
+  "threads": 8,
+  "cpu_quota": 4,
+  "memory_limit_bytes": 12884901888,
+  "runs": [
+    {
+      "variant": "baseline",
+      "repetition": 0,
+      "seconds": 3.705568
+    },
+    {
+      "variant": "reference",
+      "repetition": 0,
+      "seconds": 2.875585
+    },
+    {
+      "variant": "optimized",
+      "repetition": 0,
+      "seconds": 2.842747
+    },
+    {
+      "variant": "reference",
+      "repetition": 1,
+      "seconds": 2.838834
+    },
+    {
+      "variant": "optimized",
+      "repetition": 1,
+      "seconds": 2.784478
+    },
+    {
+      "variant": "baseline",
+      "repetition": 1,
+      "seconds": 3.54641
+    },
+    {
+      "variant": "optimized",
+      "repetition": 2,
+      "seconds": 2.845868
+    },
+    {
+      "variant": "baseline",
+      "repetition": 2,
+      "seconds": 3.731264
+    },
+    {
+      "variant": "reference",
+      "repetition": 2,
+      "seconds": 2.922628
+    },
+    {
+      "variant": "baseline",
+      "repetition": 3,
+      "seconds": 3.630974
+    },
+    {
+      "variant": "reference",
+      "repetition": 3,
+      "seconds": 2.849632
+    },
+    {
+      "variant": "optimized",
+      "repetition": 3,
+      "seconds": 2.831043
+    },
+    {
+      "variant": "reference",
+      "repetition": 4,
+      "seconds": 2.836242
+    },
+    {
+      "variant": "optimized",
+      "repetition": 4,
+      "seconds": 2.764465
+    },
+    {
+      "variant": "baseline",
+      "repetition": 4,
+      "seconds": 3.586045
+    }
+  ],
+  "medians_seconds": {
+    "baseline": 3.630974,
+    "reference": 2.849632,
+    "optimized": 2.831043
+  },
+  "speedups": {
+    "baseline": 1.0,
+    "reference": 1.2741904919652782,
+    "optimized": 1.282556994012454
+  },
+  "exact_output_match": true
+}

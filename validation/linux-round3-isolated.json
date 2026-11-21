@@ -1,0 +1,116 @@
+{
+  "baseline_commit": "d52cca7d96130444086754510f8e298d5390eb84",
+  "candidate_commit": "46f8db9368847cb803a53217e5b60254b38c5b1e",
+  "threads": 8,
+  "cpu_quota": 4,
+  "memory_limit_bytes": 12884901888,
+  "runs": [
+    {
+      "variant": "baseline",
+      "repetition": 0,
+      "seconds": 3.622308
+    },
+    {
+      "variant": "packed",
+      "repetition": 0,
+      "seconds": 3.497447
+    },
+    {
+      "variant": "packed-wide",
+      "repetition": 0,
+      "seconds": 3.649133
+    },
+    {
+      "variant": "parser",
+      "repetition": 0,
+      "seconds": 3.439333
+    },
+    {
+      "variant": "identity",
+      "repetition": 0,
+      "seconds": 3.553294
+    },
+    {
+      "variant": "reduce",
+      "repetition": 0,
+      "seconds": 3.519033
+    },
+    {
+      "variant": "packed",
+      "repetition": 1,
+      "seconds": 3.51176
+    },
+    {
+      "variant": "packed-wide",
+      "repetition": 1,
+      "seconds": 3.716329
+    },
+    {
+      "variant": "parser",
+      "repetition": 1,
+      "seconds": 3.50163
+    },
+    {
+      "variant": "identity",
+      "repetition": 1,
+      "seconds": 3.546254
+    },
+    {
+      "variant": "reduce",
+      "repetition": 1,
+      "seconds": 3.651069
+    },
+    {
+      "variant": "baseline",
+      "repetition": 1,
+      "seconds": 3.652826
+    },
+    {
+      "variant": "packed-wide",
+      "repetition": 2,
+      "seconds": 3.639758
+    },
+    {
+      "variant": "parser",
+      "repetition": 2,
+      "seconds": 3.449229
+    },
+    {
+      "variant": "identity",
+      "repetition": 2,
+      "seconds": 3.507478
+    },
+    {
+      "variant": "reduce",
+      "repetition": 2,
+      "seconds": 3.52453
+    },
+    {
+      "variant": "baseline",
+      "repetition": 2,
+      "seconds": 3.572013
+    },
+    {
+      "variant": "packed",
+      "repetition": 2,
+      "seconds": 3.459711
+    }
+  ],
+  "medians_seconds": {
+    "baseline": 3.622308,
+    "packed": 3.497447,
+    "packed-wide": 3.649133,
+    "parser": 3.449229,
+    "identity": 3.546254,
+    "reduce": 3.52453
+  },
+  "speedups": {
+    "baseline": 1.0,
+    "packed": 1.0357006124753283,
+    "packed-wide": 0.9926489388027238,
+    "parser": 1.0501790400115505,
+    "identity": 1.0214462923411578,
+    "reduce": 1.0277421386681345
+  },
+  "exact_output_match": true
+}

@@ -1,0 +1,15 @@
+{
+  "runtime_commit": "bc1ffbcec5dd6620b585d0832ffb29635fa7ad24",
+  "linux_default_unit_tests": 52,
+  "linux_no_default_unit_tests": 31,
+  "windows_default_unit_tests": 49,
+  "native_exact_validation_runs": 101,
+  "public_dev_user_rows": 117038,
+  "public_dev_campaign_rows": 27400,
+  "writer_boundary_rows": 131077,
+  "writer_row_groups": [
+    131072,
+    5
+  ],
+  "exact_rows_schemas_nulls_and_unique_keys": true
+}
