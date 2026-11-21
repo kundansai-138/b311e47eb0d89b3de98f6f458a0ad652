@@ -1,3 +1,23 @@
+# Current compact pipeline validation
+
+Runtime `fca520dab97a01fdc38ad68eeb6916175c4ce738` passed:
+
+- 32 default-feature Rust tests and 24 with no default features; explicit microbenchmarks are excluded.
+- All 36 supplied fixtures, 44 general adversarial fixtures, and 5 exact-ID boundary fixtures.
+- A 131,072-row independent-oracle stress case with four approximately 7 MiB event files, 65,536 distinct event IDs, 2,259 invalid earliest copies, long/Unicode IDs, NUL/DEL boundaries, and unused canonical aliases. Both 1-worker and 8-worker runs matched all 1,358 user rows and 42 campaign rows.
+- Exact public answer comparison: 117,038 user rows and 27,400 campaign rows, valid schemas and unique keys.
+- The Linux/amd64 image build and size check, all 86 unique fixtures (the six ID/stress cases are repeated at 1 and 8 workers), and public-dev digests under scorer filesystem restrictions: https://github.com/kundansai-138/shopping-sessions/actions/runs/44852825095
+- Five rotated 20M runs of each comparison image with full-table equality.
+- The complete 60M regression under 12 GiB with no swap, including exact partition-independent digests for every output row.
+
+The tests force complete event-hash collisions, cover both fallback-remapping domains, check reference-width limits without huge allocations, and compare SIMD/scalar CSV parsing against an independent parser. Length sentinels preserve zero bytes and all nine DEL bytes; hash equality never decides identity. Only guaranteed-valid F1 ingest timestamps use unchecked time-digit arithmetic; event/click timestamps remain strictly validated.
+
+The supplied fixture files are unchanged. See `PERFORMANCE.md` and `validation/linux-compact-*.json` for measurement conditions and results. These checks do not replace the organizer's hidden scorer.
+
+---
+
+## Earlier validation records
+
 # Validation performed on 2026-11-21
 
 ## Current native SIMD / Parquet version

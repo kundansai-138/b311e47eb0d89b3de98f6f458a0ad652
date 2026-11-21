@@ -1,0 +1,133 @@
+{
+  "baseline_commit": "05a1cf788aa499b9c2d3fbaf2f03a437695d2749",
+  "candidate_commit": "6df9854756a575ae73517782a7fa96fae333fd98",
+  "threads": 8,
+  "cpu_quota": 4,
+  "memory_limit_bytes": 12884901888,
+  "runs": [
+    {
+      "variant": "baseline",
+      "repetition": 0,
+      "seconds": 6.99513
+    },
+    {
+      "variant": "dt32",
+      "repetition": 0,
+      "seconds": 6.092313
+    },
+    {
+      "variant": "dt128",
+      "repetition": 0,
+      "seconds": 5.767236
+    },
+    {
+      "variant": "inline32",
+      "repetition": 0,
+      "seconds": 4.20161
+    },
+    {
+      "variant": "inline64",
+      "repetition": 0,
+      "seconds": 4.141901
+    },
+    {
+      "variant": "inline128",
+      "repetition": 0,
+      "seconds": 3.954136
+    },
+    {
+      "variant": "inline256",
+      "repetition": 0,
+      "seconds": 3.978687
+    },
+    {
+      "variant": "dt32",
+      "repetition": 1,
+      "seconds": 5.95576
+    },
+    {
+      "variant": "dt128",
+      "repetition": 1,
+      "seconds": 5.760941
+    },
+    {
+      "variant": "inline32",
+      "repetition": 1,
+      "seconds": 4.117834
+    },
+    {
+      "variant": "inline64",
+      "repetition": 1,
+      "seconds": 3.922904
+    },
+    {
+      "variant": "inline128",
+      "repetition": 1,
+      "seconds": 3.860569
+    },
+    {
+      "variant": "inline256",
+      "repetition": 1,
+      "seconds": 3.823218
+    },
+    {
+      "variant": "baseline",
+      "repetition": 1,
+      "seconds": 6.363412
+    },
+    {
+      "variant": "dt128",
+      "repetition": 2,
+      "seconds": 5.610829
+    },
+    {
+      "variant": "inline32",
+      "repetition": 2,
+      "seconds": 4.059429
+    },
+    {
+      "variant": "inline64",
+      "repetition": 2,
+      "seconds": 4.263893
+    },
+    {
+      "variant": "inline128",
+      "repetition": 2,
+      "seconds": 3.87765
+    },
+    {
+      "variant": "inline256",
+      "repetition": 2,
+      "seconds": 3.922018
+    },
+    {
+      "variant": "baseline",
+      "repetition": 2,
+      "seconds": 6.548692
+    },
+    {
+      "variant": "dt32",
+      "repetition": 2,
+      "seconds": 5.910283
+    }
+  ],
+  "medians_seconds": {
+    "baseline": 6.548692,
+    "dt32": 5.95576,
+    "dt128": 5.760941,
+    "inline32": 4.117834,
+    "inline64": 4.141901,
+    "inline128": 3.87765,
+    "inline256": 3.922018
+  },
+  "speedups": {
+    "baseline": 1.0,
+    "dt32": 1.0995560600158503,
+    "dt128": 1.1367399874430237,
+    "inline32": 1.5903244278424045,
+    "inline64": 1.581083661825814,
+    "inline128": 1.688830090389798,
+    "inline256": 1.669725126197789
+  },
+  "exact_output_match": true
+}

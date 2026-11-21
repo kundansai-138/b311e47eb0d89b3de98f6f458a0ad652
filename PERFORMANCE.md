@@ -1,3 +1,25 @@
+# Compact exact IDs and parallel reduction
+
+Runtime commit `fca520dab97a01fdc38ad68eeb6916175c4ce738` was compared with the previously submitted `05a1cf788aa499b9c2d3fbaf2f03a437695d2749` and the earlier compact-ID candidate on one GitHub Actions Linux runner. The official generator produced seed 818 with 20,000,000 events and 5,000,000 clicks. Five runs per image rotated order; all used eight worker threads, a four-CPU quota, 12 GiB memory, no swap/network, UID 1000, a read-only root and 64 MiB `/tmp`. Docker start-to-finish times include output writing and process exit.
+
+| Version | Run 1 | Run 2 | Run 3 | Run 4 | Run 5 | Median |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Previous submission `05a1cf7` | 5.197s | 5.231s | 5.226s | 5.279s | 5.165s | **5.226s** |
+| Compact-ID reference | 3.124s | 3.211s | 3.139s | 3.208s | 3.281s | **3.208s** |
+| Current production engine | 2.905s | 2.908s | 2.867s | 2.898s | 2.966s | **2.905s** |
+
+The production median is **44.4% lower than the previous submission (1.799x speedup)**. All 2,245,254 user rows and 28,014 campaign rows match across the three images. Results: https://github.com/kundansai-138/shopping-sessions/actions/runs/44852512536
+
+The engine uses reversible keys for short ASCII IDs and full-byte dictionaries for other IDs, 40-byte raw records, 24-byte surviving events, 40-byte clicks, and direct deduplication of worker-owned chunks. Exact token equality handles hash collisions. A validated date cache, row-local CSV fields, independent person partitions, and bounded capacity hints reduce work while retaining all required checks. Non-purchase events skip price conversion/product lookup; invalid earliest duplicates remain tombstones. Larger inputs use up to 16 partitions per worker. Each input file is mapped once. Lazy mapping and alternative hashes did not establish a useful end-to-end gain, so the existing prefaulted mapping and non-AES hash approach remain.
+
+The full seed 42 regression with 60,000,000 events and 15,000,000 clicks completed in **12.113s** using eight workers, a four-CPU quota, and a hard 12 GiB limit. Peak cgroup memory was **3,578,023,936 bytes (3.33 GiB)**; output plus scratch used **287,424,375 bytes**. Every row matched the partition-independent original-output digests: 6,658,935 user rows and 28,014 campaign rows. This independent run measures resources and correctness, not a controlled 60M speedup. Results: https://github.com/kundansai-138/shopping-sessions/actions/runs/44852515400
+
+Evidence is in `validation/linux-compact-*.json`. These are GitHub runner timings, not leaderboard scores. Only the competition scorer can establish the new score; small differences between runners are not comparable. The latest documentation-only commit preserves this runtime exactly.
+
+---
+
+## Previous optimization rounds
+
 # Native SIMD and Parquet optimization
 
 Runtime commit `7e9ca62d657e29c79eba9a55eb2d37f23155226d` was compared with the previously submitted `38cd60db715d1ecb9434e58578ae90fff4c8fd35`. Both ran on the same GitHub Actions Ubuntu runner against official-generator seed 818: 20,000,000 events and 5,000,000 clicks. Five runs per image alternated order, with four CPUs/workers, 12 GiB memory, no swap/network, UID 1000, read-only root, and 64 MiB `/tmp`. Docker start-to-finish durations include the complete process lifetime and output writing.

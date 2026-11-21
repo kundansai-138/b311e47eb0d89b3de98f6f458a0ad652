@@ -1,0 +1,150 @@
+{
+  "baseline_commit": "05a1cf788aa499b9c2d3fbaf2f03a437695d2749",
+  "candidate_commit": "587acc1f3bf8eeb507cc4eefa07a1d0f7c50df5e",
+  "threads": 8,
+  "cpu_quota": 4,
+  "memory_limit_bytes": 12884901888,
+  "runs": [
+    {
+      "variant": "baseline",
+      "repetition": 0,
+      "seconds": 6.496458
+    },
+    {
+      "variant": "inline",
+      "repetition": 0,
+      "seconds": 3.928998
+    },
+    {
+      "variant": "reserve",
+      "repetition": 0,
+      "seconds": 4.05672
+    },
+    {
+      "variant": "csv",
+      "repetition": 0,
+      "seconds": 3.885358
+    },
+    {
+      "variant": "chunk",
+      "repetition": 0,
+      "seconds": 3.934685
+    },
+    {
+      "variant": "nohash",
+      "repetition": 0,
+      "seconds": 3.909506
+    },
+    {
+      "variant": "identity",
+      "repetition": 0,
+      "seconds": 3.922266
+    },
+    {
+      "variant": "lazy",
+      "repetition": 0,
+      "seconds": 3.918864
+    },
+    {
+      "variant": "inline",
+      "repetition": 1,
+      "seconds": 3.937419
+    },
+    {
+      "variant": "reserve",
+      "repetition": 1,
+      "seconds": 3.859001
+    },
+    {
+      "variant": "csv",
+      "repetition": 1,
+      "seconds": 3.943287
+    },
+    {
+      "variant": "chunk",
+      "repetition": 1,
+      "seconds": 4.019276
+    },
+    {
+      "variant": "nohash",
+      "repetition": 1,
+      "seconds": 3.902228
+    },
+    {
+      "variant": "identity",
+      "repetition": 1,
+      "seconds": 3.959119
+    },
+    {
+      "variant": "lazy",
+      "repetition": 1,
+      "seconds": 3.936729
+    },
+    {
+      "variant": "baseline",
+      "repetition": 1,
+      "seconds": 6.455251
+    },
+    {
+      "variant": "reserve",
+      "repetition": 2,
+      "seconds": 3.870893
+    },
+    {
+      "variant": "csv",
+      "repetition": 2,
+      "seconds": 4.003523
+    },
+    {
+      "variant": "chunk",
+      "repetition": 2,
+      "seconds": 3.944285
+    },
+    {
+      "variant": "nohash",
+      "repetition": 2,
+      "seconds": 3.955425
+    },
+    {
+      "variant": "identity",
+      "repetition": 2,
+      "seconds": 3.933862
+    },
+    {
+      "variant": "lazy",
+      "repetition": 2,
+      "seconds": 3.885484
+    },
+    {
+      "variant": "baseline",
+      "repetition": 2,
+      "seconds": 6.493496
+    },
+    {
+      "variant": "inline",
+      "repetition": 2,
+      "seconds": 4.047578
+    }
+  ],
+  "medians_seconds": {
+    "baseline": 6.493496,
+    "inline": 3.937419,
+    "reserve": 3.870893,
+    "csv": 3.943287,
+    "chunk": 3.944285,
+    "nohash": 3.909506,
+    "identity": 3.933862,
+    "lazy": 3.918864
+  },
+  "speedups": {
+    "baseline": 1.0,
+    "inline": 1.6491757671713376,
+    "reserve": 1.677518856759926,
+    "csv": 1.6467216309642185,
+    "chunk": 1.646304970355844,
+    "nohash": 1.6609505139524023,
+    "identity": 1.650666952729913,
+    "lazy": 1.6569842689105823
+  },
+  "exact_output_match": true
+}

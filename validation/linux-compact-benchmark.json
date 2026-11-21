@@ -1,0 +1,92 @@
+{
+  "baseline_commit": "05a1cf788aa499b9c2d3fbaf2f03a437695d2749",
+  "inline_reference_commit": "6df9854756a575ae73517782a7fa96fae333fd98",
+  "candidate_commit": "fca520dab97a01fdc38ad68eeb6916175c4ce738",
+  "threads": 8,
+  "cpu_quota": 4,
+  "memory_limit_bytes": 12884901888,
+  "runs": [
+    {
+      "variant": "baseline",
+      "repetition": 0,
+      "seconds": 5.196642
+    },
+    {
+      "variant": "inline",
+      "repetition": 0,
+      "seconds": 3.124137
+    },
+    {
+      "variant": "optimized",
+      "repetition": 0,
+      "seconds": 2.904995
+    },
+    {
+      "variant": "inline",
+      "repetition": 1,
+      "seconds": 3.210878
+    },
+    {
+      "variant": "optimized",
+      "repetition": 1,
+      "seconds": 2.908383
+    },
+    {
+      "variant": "baseline",
+      "repetition": 1,
+      "seconds": 5.230816
+    },
+    {
+      "variant": "optimized",
+      "repetition": 2,
+      "seconds": 2.866548
+    },
+    {
+      "variant": "baseline",
+      "repetition": 2,
+      "seconds": 5.226181
+    },
+    {
+      "variant": "inline",
+      "repetition": 2,
+      "seconds": 3.138808
+    },
+    {
+      "variant": "baseline",
+      "repetition": 3,
+      "seconds": 5.279007
+    },
+    {
+      "variant": "inline",
+      "repetition": 3,
+      "seconds": 3.208438
+    },
+    {
+      "variant": "optimized",
+      "repetition": 3,
+      "seconds": 2.898141
+    },
+    {
+      "variant": "inline",
+      "repetition": 4,
+      "seconds": 3.280784
+    },
+    {
+      "variant": "optimized",
+      "repetition": 4,
+      "seconds": 2.965843
+    },
+    {
+      "variant": "baseline",
+      "repetition": 4,
+      "seconds": 5.164728
+    }
+  ],
+  "medians_seconds": {
+    "baseline": 5.226181,
+    "inline": 3.208438,
+    "optimized": 2.904995
+  },
+  "speedup": 1.7990327005726345,
+  "exact_output_match": true
+}
