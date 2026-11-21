@@ -816,12 +816,12 @@ fn parse_events<'a, L: RecordLayout>(
                         let Some(bytes) = tasks.get(i) else {
                             break;
                         };
-                        rows::<7>(bytes).for_each(|f| {
+                        for f in rows::<7>(bytes) {
                             if f[0].is_empty() {
-                                return;
+                                continue;
                             }
                             let Some(ingest) = timestamps.ingest(f[3]) else {
-                                return;
+                                continue;
                             };
                             let id = event_ids.intern(f[0]);
                             let hash = event_ids.hash(id);
@@ -853,7 +853,7 @@ fn parse_events<'a, L: RecordLayout>(
                                 revenue,
                                 category,
                             });
-                        });
+                        }
                     }
                     (result, people.names, event_ids.names)
                 })
@@ -1437,24 +1437,24 @@ fn parse_clicks<'a, L: RecordLayout>(
                         let Some(bytes) = tasks.get(i) else {
                             break;
                         };
-                        rows::<4>(bytes).for_each(|[id, user, camp, time]| {
+                        for [id, user, camp, time] in rows::<4>(bytes) {
                             if id.is_empty() || user.is_empty() {
-                                return;
+                                continue;
                             }
                             let Some(&campaign) = catalog.campaigns.get(camp) else {
-                                return;
+                                continue;
                             };
                             let Some(ts) = timestamps.parse(time) else {
-                                return;
+                                continue;
                             };
                             if ts < start - WEEK || ts >= end {
-                                return;
+                                continue;
                             }
                             // An unlinked ID absent from all validated event
                             // candidates cannot own a surviving session. Linked
                             // aliases are all present in the complete dictionary.
                             let Some(person) = identity.lookup(user) else {
-                                return;
+                                continue;
                             };
                             output[person_partition(person, partitions)].push(Click::<L> {
                                 person,
@@ -1462,7 +1462,7 @@ fn parse_clicks<'a, L: RecordLayout>(
                                 ts: L::encode(ts, 0, 0, start - WEEK).0,
                                 campaign,
                             });
-                        });
+                        }
                     }
                     output
                 })

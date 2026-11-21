@@ -33,6 +33,9 @@ jobs:
           mkdir /tmp/shopping-baseline
           git archive 55c31f8825654cabcfbf7ab4888116e9e93d6183 | tar -x -C /tmp/shopping-baseline
           timeout 600 docker build -t shopping-sessions:baseline /tmp/shopping-baseline
+          mkdir /tmp/shopping-reference
+          git archive ed66f092cdf4b40d35718d0091ba9908100c5995 | tar -x -C /tmp/shopping-reference
+          timeout 600 docker build -t shopping-sessions:reference /tmp/shopping-reference
           started=$(date +%s)
           timeout 600 docker build -t shopping-sessions:optimized .
           echo "Production build seconds: $(($(date +%s)-started))" | tee reports/probe-${{ matrix.probe }}/build-time.txt

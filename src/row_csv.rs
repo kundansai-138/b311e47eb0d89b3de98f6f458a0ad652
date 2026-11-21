@@ -24,33 +24,6 @@ unsafe fn masks64(ptr: *const u8) -> (u64, u64, u64) {
     )
 }
 
-/// The mask kernel needs precisely AVX512F and AVX512BW. Rust's feature
-/// detection also checks the OS's opmask/ZMM register-state support.
-#[inline]
-fn avx512_available() -> bool {
-    #[cfg(target_arch = "x86_64")]
-    {
-        std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512bw")
-    }
-    #[cfg(not(target_arch = "x86_64"))]
-    {
-        false
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "avx512f,avx512bw")]
-#[inline]
-unsafe fn masks64_avx512(ptr: *const u8) -> (u64, u64, u64) {
-    use std::arch::x86_64::*;
-    // The caller proves that all64 bytes are inside the input slice.
-    let bytes = _mm512_loadu_si512(ptr.cast());
-    let lines = _mm512_cmpeq_epi8_mask(bytes, _mm512_set1_epi8(b'\n' as i8));
-    let commas = _mm512_cmpeq_epi8_mask(bytes, _mm512_set1_epi8(b',' as i8));
-    let quotes = _mm512_cmpeq_epi8_mask(bytes, _mm512_set1_epi8(b'"' as i8));
-    (commas | lines, quotes, lines)
-}
-
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "bmi2")]
 unsafe fn extract(bits: u128, mask: u128) -> u64 {
@@ -66,7 +39,6 @@ pub struct Rows<'a, const N: usize> {
     bytes: &'a [u8],
     position: usize,
     fast: bool,
-    avx512: bool,
     fallback: fast_csv::Rows<'a, N>,
 }
 impl<'a, const N: usize> Rows<'a, N> {
@@ -81,10 +53,6 @@ impl<'a, const N: usize> Rows<'a, N> {
             bytes,
             position: 0,
             fast,
-            // Select a supported vector width once per input chunk.
-            avx512: fast
-                && avx512_available()
-                && std::env::var("SHOP_CSV_BACKEND").as_deref() != Ok("avx2"),
             fallback: fast_csv::Rows::new(bytes),
         }
     }
@@ -96,11 +64,10 @@ impl<'a, const N: usize> Rows<'a, N> {
         row
     }
 }
-impl<'a, const N: usize> Rows<'a, N> {
-    // Called only by the guarded Iterator dispatch or a matching target-feature
-    // chunk loop. Always-inline keeps extraction and its row callback together.
-    #[inline(always)]
-    unsafe fn next_impl<const WIDE: bool>(&mut self) -> Option<[&'a [u8]; N]> {
+impl<'a, const N: usize> Iterator for Rows<'a, N> {
+    type Item = [&'a [u8]; N];
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
         if !self.fast {
             return self.fallback.next();
         }
@@ -110,11 +77,7 @@ impl<'a, const N: usize> Rows<'a, N> {
             if rest.len() < 64 {
                 return self.slow_row();
             }
-            let (s, q, l) = if WIDE {
-                unsafe { masks64_avx512(rest.as_ptr()) }
-            } else {
-                unsafe { masks64(rest.as_ptr()) }
-            };
+            let (s, q, l) = unsafe { masks64(rest.as_ptr()) };
             let (mut low, high, quotes, end) = if l != 0 {
                 let through = l ^ l.wrapping_sub(1);
                 (
@@ -127,11 +90,7 @@ impl<'a, const N: usize> Rows<'a, N> {
                 if rest.len() < 128 {
                     return self.slow_row();
                 }
-                let (s2, q2, l2) = if WIDE {
-                    unsafe { masks64_avx512(rest.as_ptr().add(64)) }
-                } else {
-                    unsafe { masks64(rest.as_ptr().add(64)) }
-                };
+                let (s2, q2, l2) = unsafe { masks64(rest.as_ptr().add(64)) };
                 if l2 == 0 {
                     return self.slow_row();
                 }
@@ -192,66 +151,6 @@ impl<'a, const N: usize> Rows<'a, N> {
         }
         None
     }
-
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx2,bmi2")]
-    unsafe fn for_each_avx2<F>(mut self, mut callback: F)
-    where
-        F: FnMut([&'a [u8]; N]),
-    {
-        while let Some(row) = self.next_impl::<false>() {
-            callback(row);
-        }
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    #[target_feature(enable = "avx512f,avx512bw,avx2,bmi2")]
-    unsafe fn for_each_avx512<F>(mut self, mut callback: F)
-    where
-        F: FnMut([&'a [u8]; N]),
-    {
-        while let Some(row) = self.next_impl::<true>() {
-            callback(row);
-        }
-    }
-}
-
-impl<'a, const N: usize> Iterator for Rows<'a, N> {
-    type Item = [&'a [u8]; N];
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        if !self.fast {
-            return self.fallback.next();
-        }
-        // Both booleans are established by constructor CPUID/OS checks.
-        unsafe {
-            if self.avx512 {
-                self.next_impl::<true>()
-            } else {
-                self.next_impl::<false>()
-            }
-        }
-    }
-    #[inline]
-    fn for_each<F>(self, callback: F)
-    where
-        F: FnMut(Self::Item),
-    {
-        #[cfg(target_arch = "x86_64")]
-        if self.fast {
-            // Select the ISA once per complete input chunk. Each worker loop is
-            // monomorphized with the caller's exact closure (no function pointer).
-            unsafe {
-                if self.avx512 {
-                    self.for_each_avx512(callback);
-                } else {
-                    self.for_each_avx2(callback);
-                }
-            }
-            return;
-        }
-        self.fallback.for_each(callback);
-    }
 }
 
 #[cfg(test)]
@@ -267,31 +166,6 @@ mod tests {
             expected,
             "N={N}, input={bytes:?}"
         );
-        let mut avx2 = Rows::<N>::new(bytes);
-        avx2.avx512 = false;
-        assert_eq!(avx2.collect::<Vec<_>>(), expected, "forced AVX2 N={N}");
-        if avx512_available() {
-            let mut avx512 = Rows::<N>::new(bytes);
-            avx512.avx512 = true;
-            assert_eq!(avx512.collect::<Vec<_>>(), expected, "forced AVX512 N={N}");
-        }
-        let mut callback_avx2 = Rows::<N>::new(bytes);
-        callback_avx2.avx512 = false;
-        let mut callback_rows = Vec::new();
-        callback_avx2.for_each(|row| callback_rows.push(row));
-        assert_eq!(callback_rows, expected, "callback AVX2 N={N}");
-        if avx512_available() {
-            let mut callback_avx512 = Rows::<N>::new(bytes);
-            callback_avx512.avx512 = true;
-            let mut callback_rows = Vec::new();
-            callback_avx512.for_each(|row| callback_rows.push(row));
-            assert_eq!(callback_rows, expected, "callback AVX512 N={N}");
-        }
-        let mut callback_scalar = Rows::<N>::new(bytes);
-        callback_scalar.fast = false;
-        let mut callback_rows = Vec::new();
-        callback_scalar.for_each(|row| callback_rows.push(row));
-        assert_eq!(callback_rows, expected, "callback fallback N={N}");
         let mut scalar = Rows::<N>::new(bytes);
         scalar.fast = false;
         assert_eq!(scalar.collect::<Vec<_>>(), expected);
@@ -403,47 +277,6 @@ mod tests {
             check::<2>(&bytes);
             check::<4>(&bytes);
             check::<7>(&bytes);
-        }
-    }
-    #[test]
-    fn avx512_mask_kernel_matches_avx2_and_scalar_when_supported() {
-        let available = avx512_available();
-        if std::env::var("SHOP_REQUIRE_AVX512").as_deref() == Ok("1") {
-            assert!(
-                available,
-                "this run requires an actual AVX512F/BW-capable CPU"
-            );
-        }
-        if !available {
-            eprintln!("AVX512F/BW unavailable; guarded path not executed");
-            return;
-        }
-        #[cfg(target_arch = "x86_64")]
-        {
-            assert!(std::is_x86_feature_detected!("avx2"));
-            let mut data = [0u8; 192];
-            let mut state = 0x71e27a03514f92cbu64;
-            for seed in 0..512 {
-                for byte in &mut data {
-                    state ^= state << 13;
-                    state ^= state >> 7;
-                    state ^= state << 17;
-                    *byte = if seed < 256 { seed as u8 } else { state as u8 };
-                }
-                for offset in 0..64 {
-                    let bytes = &data[offset..offset + 64];
-                    let mut expected = (0u64, 0u64, 0u64);
-                    for (bit, &byte) in bytes.iter().enumerate() {
-                        expected.0 |= u64::from(byte == b',' || byte == b'\n') << bit;
-                        expected.1 |= u64::from(byte == b'"') << bit;
-                        expected.2 |= u64::from(byte == b'\n') << bit;
-                    }
-                    let actual = unsafe { masks64_avx512(bytes.as_ptr()) };
-                    assert_eq!(actual, expected, "seed={seed},offset={offset}");
-                    assert_eq!(actual, unsafe { masks64(bytes.as_ptr()) });
-                }
-            }
-            eprintln!("AVX512F/BW CSV mask path executed and matched scalar/AVX2");
         }
     }
 }

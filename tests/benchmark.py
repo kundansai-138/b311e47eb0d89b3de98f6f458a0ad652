@@ -21,7 +21,7 @@ def main():
     args.report.mkdir(parents=True, exist_ok=True)
     threads = 8
     quota = min(4, len(os.sched_getaffinity(0)))
-    variants = ["baseline", "optimized"]
+    variants = ["baseline", "reference", "optimized"]
     records = []
     first_outputs = {}
     with tempfile.TemporaryDirectory(prefix="shopping-benchmark-", ignore_cleanup_errors=True) as temp:
@@ -71,6 +71,7 @@ def main():
         medians = {v: statistics.median(r["seconds"] for r in records if r["variant"] == v)
                    for v in variants}
         report = {"baseline_commit": "55c31f8825654cabcfbf7ab4888116e9e93d6183",
+                  "reference_commit": "ed66f092cdf4b40d35718d0091ba9908100c5995",
                   "candidate_commit": os.environ.get("GITHUB_SHA", "local"), "threads": threads, "cpu_quota": quota, "memory_limit_bytes": 12*1024**3, "runs": records,
                   "medians_seconds": medians, "speedups": {v:medians["baseline"]/medians[v] for v in variants},
                   "exact_output_match": True}
