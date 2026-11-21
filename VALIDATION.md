@@ -25,8 +25,12 @@ Generator counts exclude extra dirty/duplicate rows. The 60M run parsed 64,487,7
 
 RSS was sampled about every 20 ms using psutil, summing the launcher and its children. It excludes kernel file-cache accounting and is not a cgroup memory-limit measurement. Scratch/output totals include small logs and measurement files. Machine-readable measurements are in `validation-results.json`.
 
-## Checks still required in the target environment
+## Linux container validation
 
-The initial Linux/amd64 image built successfully in 34 seconds on GitHub Actions using Rust 1.90. Commit `8e5f263e969d7070f8baf5c9d1e55a15579f5c37` subsequently passed both fixture suites and the public dev answer digest check under the requested GitHub account. Both fixture suites (78 cases) passed inside the image with a read-only root, non-root UID, no network, and a 64 MB `/tmp`. The full workflow completed successfully: https://github.com/kundansai-138/shopping-sessions/actions/runs/44839106789. These tiny fixtures used two CPUs and 5 GB RAM; they do not validate full-size cgroup memory behavior. Local native compilation used Rust 1.99.
+The optimized Linux/amd64 image passed its build-time seven Rust tests, all 80 fixture cases, the public dev answer digest check, and the image-size check under the requested GitHub account. CI for the scale-tested commit: https://github.com/kundansai-138/shopping-sessions/actions/runs/44841262843
 
-The 20M and 60M runs are resource/invariant checks, not full comparisons against a hidden reference. Local Windows timings are not predictions or guarantees of Google Cloud scorer timing, hidden-data correctness, image size/build time, or leaderboard position. The public repository is https://github.com/kundansai-138/shopping-sessions. Submitting the chosen commit to the competition scorer remains an external step.
+The optimized code also completed an official-generator 60M-event/15M-click dataset under a hard **12 GiB** Linux cgroup memory limit with swap disabled. Container time was **28.998 seconds** with a four-CPU quota and eight workers. Peak cgroup memory was **10.37 GiB**, including charged filesystem cache. Canonical digests covering every output row matched the original implementation. Results: https://github.com/kundansai-138/shopping-sessions/actions/runs/44841265207
+
+The controlled 20M comparison used the same runner for all versions, rotated three runs per image, and compared every output value. Median container time improved from **8.560 s to 7.211 s**, a **15.8% reduction**. See `PERFORMANCE.md` and the JSON files in `validation/`.
+
+The original Windows scale runs above were resource/invariant checks. The later Linux runs added complete baseline comparisons and a constrained memory test. These results are not organizer-provided hidden references or guarantees of Google Cloud scorer timing or leaderboard position. The public repository is https://github.com/kundansai-138/shopping-sessions. Submitting the chosen commit to the competition scorer remains an external step.

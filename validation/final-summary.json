@@ -1,0 +1,79 @@
+{
+  "correctness": {
+    "supplied_fixtures": 36,
+    "additional_fixtures": 44,
+    "rust_unit_tests": 7,
+    "public_dev_exact_match": true
+  },
+  "linux_benchmark": {
+    "threads": 4,
+    "memory_limit_bytes": 12884901888,
+    "runs": [
+      {
+        "variant": "baseline",
+        "repetition": 0,
+        "seconds": 8.840033
+      },
+      {
+        "variant": "eager",
+        "repetition": 0,
+        "seconds": 7.614679
+      },
+      {
+        "variant": "optimized",
+        "repetition": 0,
+        "seconds": 7.217843
+      },
+      {
+        "variant": "eager",
+        "repetition": 1,
+        "seconds": 7.558402
+      },
+      {
+        "variant": "optimized",
+        "repetition": 1,
+        "seconds": 7.211269
+      },
+      {
+        "variant": "baseline",
+        "repetition": 1,
+        "seconds": 8.560134
+      },
+      {
+        "variant": "optimized",
+        "repetition": 2,
+        "seconds": 6.857389
+      },
+      {
+        "variant": "baseline",
+        "repetition": 2,
+        "seconds": 8.558815
+      },
+      {
+        "variant": "eager",
+        "repetition": 2,
+        "seconds": 7.394693
+      }
+    ],
+    "medians_seconds": {
+      "baseline": 8.560134,
+      "eager": 7.558402,
+      "optimized": 7.211269
+    },
+    "speedup": 1.1870496025040809,
+    "exact_output_match": true
+  },
+  "linux_scale": {
+    "seconds": 28.998475,
+    "cpu_quota": 4,
+    "worker_threads": 8,
+    "memory_limit_bytes": 12884901888,
+    "cgroup_memory_peak_bytes": 11138543616,
+    "baseline_digest_match": true,
+    "generated_events": 60000000,
+    "generated_clicks": 15000000,
+    "seed": 42,
+    "out_plus_scratch_bytes": 650019463
+  },
+  "ci": "https://github.com/kundansai-138/shopping-sessions/actions/runs/44841262843"
+}

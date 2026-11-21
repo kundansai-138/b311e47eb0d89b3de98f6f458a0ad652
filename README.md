@@ -1,5 +1,7 @@
 # Shopping Sessions
 
+Public submission repository: https://github.com/kundansai-138/shopping-sessions
+
 An implementation of scorer `shopping-sessions-4`, derived from the supplied Polars starter. A dependency-free Rust engine handles the input and aggregation; PyArrow converts the engine's column buffers to Parquet. The supplied 36 fixtures and scorer-style Docker wrapper are retained.
 
 ## Build and validate the submission
