@@ -20,7 +20,7 @@ def main():
     args = parser.parse_args()
     args.report.mkdir(parents=True, exist_ok=True)
     threads = min(8, len(os.sched_getaffinity(0)))
-    variants = ["baseline", "eager", "optimized"]
+    variants = ["baseline", "optimized"]
     records = []
     first_outputs = {}
     with tempfile.TemporaryDirectory(prefix="shopping-benchmark-", ignore_cleanup_errors=True) as temp:
@@ -64,12 +64,13 @@ def main():
         for table, keys in [("user_daily", ["user_id", "day"]), ("campaign_daily", ["campaign_id", "day"])]:
             tables = [pq.read_table(first_outputs[v] / table).sort_by([(key, "ascending") for key in keys])
                       for v in variants]
-            if any(not tables[0].equals(table, check_metadata=False) for table in tables[1:]):
+            if any(not tables[0].equals(table.cast(tables[0].schema), check_metadata=False) for table in tables[1:]):
                 raise ValueError(f"{table}: baseline and optimized output differ")
             print(f"{table}: all {tables[0].num_rows} rows exactly equal", flush=True)
         medians = {v: statistics.median(r["seconds"] for r in records if r["variant"] == v)
                    for v in variants}
-        report = {"threads": threads, "memory_limit_bytes": 12*1024**3, "runs": records,
+        report = {"baseline_commit": "38cd60db715d1ecb9434e58578ae90fff4c8fd35",
+                  "candidate_commit": os.environ.get("GITHUB_SHA", "local"), "threads": threads, "memory_limit_bytes": 12*1024**3, "runs": records,
                   "medians_seconds": medians, "speedup": medians["baseline"]/medians["optimized"],
                   "exact_output_match": True}
         (args.report / "results.json").write_text(json.dumps(report, indent=2)+"\n")

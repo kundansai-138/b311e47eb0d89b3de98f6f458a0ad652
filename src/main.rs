@@ -1,14 +1,18 @@
-//! Exact CSV/session engine. The Python entry point converts the emitted Arrow
-//! buffers to Parquet; no Python objects are created for input records.
+//! Exact native CSV, session, attribution, and Parquet engine.
+mod parquet_output;
+use parquet_output::{CampaignWriter, UserWriter};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::hash::{BuildHasherDefault, Hasher};
-use std::io::{self, BufWriter, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Instant;
+
+#[cfg(feature = "fast-csv")]
+mod fast_csv;
 
 const DAY: i64 = 86_400_000;
 const WEEK: i64 = 7 * DAY;
@@ -27,7 +31,13 @@ impl Hasher for FastHasher {
     fn write(&mut self, bytes: &[u8]) {
         self.0 = self.0.rotate_left(17) ^ hash_bytes(bytes);
     }
+    #[cfg(feature = "fast-hash")]
+    #[inline]
+    fn write_usize(&mut self, value: usize) {
+        self.0 = self.0.rotate_left(17) ^ mix64(value as u64 ^ 0xa0761d6478bd642f);
+    }
 }
+#[cfg(not(feature = "fast-hash"))]
 #[inline]
 fn hash_bytes(bytes: &[u8]) -> u64 {
     let mut h = 0xcbf29ce484222325u64;
@@ -39,6 +49,49 @@ fn hash_bytes(bytes: &[u8]) -> u64 {
     h ^ (h >> 32)
 }
 
+#[cfg(feature = "fast-hash")]
+#[inline]
+fn mix64(mut value: u64) -> u64 {
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
+    value ^ (value >> 31)
+}
+#[cfg(feature = "fast-hash")]
+#[inline]
+fn hash_bytes(bytes: &[u8]) -> u64 {
+    // All bytes contribute. The hash only selects buckets; original byte
+    // strings still decide equality, so collisions never merge distinct IDs.
+    let mut h = 0x9e3779b97f4a7c15 ^ bytes.len() as u64;
+    let mut chunks = bytes.chunks_exact(8);
+    for chunk in &mut chunks {
+        let word = u64::from_le_bytes(chunk.try_into().unwrap());
+        h = (h ^ word).wrapping_mul(0x9e3779b185ebca87).rotate_left(27);
+    }
+    let tail = chunks.remainder();
+    let tail_word = if tail.len() >= 4 {
+        let a = u32::from_le_bytes(tail[..4].try_into().unwrap()) as u64;
+        let b = u32::from_le_bytes(tail[tail.len() - 4..].try_into().unwrap()) as u64;
+        (a << 32) | b
+    } else if !tail.is_empty() {
+        (tail[0] as u64) << 16 | (tail[tail.len() / 2] as u64) << 8 | tail[tail.len() - 1] as u64
+    } else {
+        0
+    };
+    mix64(h ^ tail_word)
+}
+
+#[cfg(feature = "fast-csv")]
+#[inline]
+fn rows<const N: usize>(bytes: &[u8]) -> fast_csv::Rows<'_, N> {
+    fast_csv::Rows::new(bytes)
+}
+#[cfg(not(feature = "fast-csv"))]
+#[inline]
+fn rows<const N: usize>(bytes: &[u8]) -> impl Iterator<Item = [&[u8]; N]> {
+    bytes.split(|&b| b == b'\n').filter_map(fields::<N>)
+}
+
+#[cfg(any(test, not(feature = "fast-csv")))]
 #[inline]
 fn field(value: &[u8]) -> Option<&[u8]> {
     if value.first() == Some(&b'"') {
@@ -57,6 +110,7 @@ fn field(value: &[u8]) -> Option<&[u8]> {
         Some(value)
     }
 }
+#[cfg(any(test, not(feature = "fast-csv")))]
 #[inline]
 fn fields<const N: usize>(line: &[u8]) -> Option<[&[u8]; N]> {
     if line.is_empty() {
@@ -79,6 +133,7 @@ fn body(bytes: &[u8]) -> &[u8] {
         .position(|&b| b == b'\n')
         .map_or(&[], |p| &bytes[p + 1..])
 }
+#[cfg(not(feature = "fast-digits"))]
 #[inline]
 fn digits(bytes: &[u8]) -> Option<i64> {
     if bytes.is_empty() {
@@ -93,6 +148,31 @@ fn digits(bytes: &[u8]) -> Option<i64> {
     }
     Some(n)
 }
+#[cfg(feature = "fast-digits")]
+#[inline]
+fn digits(mut bytes: &[u8]) -> Option<i64> {
+    if bytes.is_empty() {
+        return None;
+    }
+    // Arbitrarily many leading zeroes are legal. Once removed, at most19
+    // decimal digits can fit i64;19 digits always fit the u64 accumulator.
+    while bytes.first() == Some(&b'0') {
+        bytes = &bytes[1..];
+    }
+    if bytes.len() > 19 {
+        return None;
+    }
+    let mut n = 0u64;
+    for &byte in bytes {
+        let digit = byte.wrapping_sub(b'0');
+        if digit > 9 {
+            return None;
+        }
+        n = n * 10 + digit as u64;
+    }
+    (n <= i64::MAX as u64).then_some(n as i64)
+}
+
 #[inline]
 fn pair(b: &[u8], i: usize) -> Option<i64> {
     let a = b[i];
@@ -191,7 +271,32 @@ fn csv_paths(path: &Path) -> io::Result<Vec<PathBuf>> {
     paths.sort();
     Ok(paths)
 }
-fn load_files(paths: &[PathBuf], ncpu: usize) -> io::Result<Vec<Vec<u8>>> {
+// Input datasets are immutable for the lifetime of this process. Read-only
+// maps keep their backing storage alive until every borrowed field is dropped.
+enum InputFile {
+    Empty,
+    Mapped(memmap2::Mmap),
+}
+impl std::ops::Deref for InputFile {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        match self {
+            Self::Empty => &[],
+            Self::Mapped(map) => map,
+        }
+    }
+}
+fn load_file(path: &Path) -> io::Result<InputFile> {
+    let file = File::open(path)?;
+    if file.metadata()?.len() == 0 {
+        return Ok(InputFile::Empty);
+    }
+    // SAFETY: the scorer mounts /data read-only and does not change these files.
+    // The mapping owns the lifetime of all slices returned from this InputFile.
+    let map = unsafe { memmap2::MmapOptions::new().populate().map(&file)? };
+    Ok(InputFile::Mapped(map))
+}
+fn load_files(paths: &[PathBuf], ncpu: usize) -> io::Result<Vec<InputFile>> {
     let next = AtomicUsize::new(0);
     let results: Vec<_> = (0..paths.len()).map(|_| Mutex::new(None)).collect();
     thread::scope(|s| {
@@ -201,7 +306,7 @@ fn load_files(paths: &[PathBuf], ncpu: usize) -> io::Result<Vec<Vec<u8>>> {
                 if i >= paths.len() {
                     break;
                 }
-                *results[i].lock().unwrap() = Some(fs::read(&paths[i]));
+                *results[i].lock().unwrap() = Some(load_file(&paths[i]));
             });
         }
     });
@@ -210,7 +315,7 @@ fn load_files(paths: &[PathBuf], ncpu: usize) -> io::Result<Vec<Vec<u8>>> {
         .map(|m| m.into_inner().unwrap().unwrap())
         .collect()
 }
-fn chunks(files: &[Vec<u8>]) -> Vec<&[u8]> {
+fn chunks(files: &[InputFile]) -> Vec<&[u8]> {
     let mut result = Vec::new();
     for file in files {
         let mut rest = body(file);
@@ -240,7 +345,7 @@ fn root(parents: &mut [usize], mut i: usize) -> usize {
     }
     i
 }
-fn identities(files: &[Vec<u8>]) -> Identity<'_> {
+fn identities(files: &[InputFile]) -> Identity<'_> {
     let reserve = files
         .iter()
         .map(|f| {
@@ -257,10 +362,7 @@ fn identities(files: &[Vec<u8>]) -> Identity<'_> {
     let mut sizes = Vec::with_capacity(reserve);
     let mut minima = Vec::with_capacity(reserve);
     for data in files {
-        for line in body(data).split(|&b| b == b'\n') {
-            let Some([a, b]) = fields::<2>(line) else {
-                continue;
-            };
+        for [a, b] in rows::<2>(body(data)) {
             if a.is_empty() || b.is_empty() {
                 continue;
             }
@@ -311,10 +413,7 @@ struct Catalog<'a> {
     organic: u32,
 }
 fn catalog<'a>(products: &'a [u8], campaigns: &'a [u8]) -> Catalog<'a> {
-    let products_rows: Vec<_> = body(products)
-        .split(|&b| b == b'\n')
-        .filter_map(fields::<2>)
-        .collect();
+    let products_rows: Vec<_> = rows::<2>(body(products)).collect();
     let mut categories: Vec<_> = products_rows
         .iter()
         .map(|r| r[1])
@@ -328,10 +427,7 @@ fn catalog<'a>(products: &'a [u8], campaigns: &'a [u8]) -> Catalog<'a> {
     }
     let mut cm = Map::default();
     let mut cv = Vec::new();
-    for [id, channel] in body(campaigns)
-        .split(|&b| b == b'\n')
-        .filter_map(fields::<2>)
-    {
+    for [id, channel] in rows::<2>(body(campaigns)) {
         cm.insert(id, cv.len() as u32);
         cv.push((id, channel));
     }
@@ -415,10 +511,7 @@ fn parse_events<'a>(
                         let Some(bytes) = tasks.get(i) else {
                             break;
                         };
-                        for line in bytes.split(|&b| b == b'\n') {
-                            let Some(f) = fields::<7>(line) else {
-                                continue;
-                            };
+                        for f in rows::<7>(bytes) {
                             if f[0].is_empty() {
                                 continue;
                             }
@@ -583,10 +676,7 @@ fn parse_clicks<'a>(
                         let Some(bytes) = tasks.get(i) else {
                             break;
                         };
-                        for line in bytes.split(|&b| b == b'\n') {
-                            let Some([id, user, camp, time]) = fields::<4>(line) else {
-                                continue;
-                            };
+                        for [id, user, camp, time] in rows::<4>(bytes) {
                             if id.is_empty() || user.is_empty() {
                                 continue;
                             }
@@ -624,123 +714,6 @@ fn io_context(error: io::Error, path: &Path) -> io::Error {
 }
 fn make_dir(path: &Path) -> io::Result<()> {
     fs::create_dir_all(path).map_err(|error| io_context(error, path))
-}
-fn writer(path: &Path) -> io::Result<BufWriter<File>> {
-    Ok(BufWriter::with_capacity(
-        64 * 1024,
-        File::create(path).map_err(|error| io_context(error, path))?,
-    ))
-}
-struct StringColumn {
-    data: BufWriter<File>,
-    offsets: BufWriter<File>,
-    valid: Option<BufWriter<File>>,
-    len: i64,
-    bits: u8,
-    used: u8,
-}
-impl StringColumn {
-    fn new(dir: &Path, name: &str, nullable: bool) -> io::Result<Self> {
-        let mut offsets = writer(&dir.join(format!("{name}.offsets")))?;
-        offsets.write_all(&0i64.to_le_bytes())?;
-        Ok(Self {
-            data: writer(&dir.join(format!("{name}.data")))?,
-            offsets,
-            valid: if nullable {
-                Some(writer(&dir.join(format!("{name}.valid")))?)
-            } else {
-                None
-            },
-            len: 0,
-            bits: 0,
-            used: 0,
-        })
-    }
-    fn push(&mut self, value: Option<&[u8]>) -> io::Result<()> {
-        if let Some(value) = value {
-            self.data.write_all(value)?;
-            self.len += value.len() as i64;
-        }
-        self.offsets.write_all(&self.len.to_le_bytes())?;
-        if let Some(valid) = &mut self.valid {
-            if value.is_some() {
-                self.bits |= 1 << self.used;
-            }
-            self.used += 1;
-            if self.used == 8 {
-                valid.write_all(&[self.bits])?;
-                self.used = 0;
-                self.bits = 0;
-            }
-        }
-        Ok(())
-    }
-    fn finish(mut self) -> io::Result<()> {
-        self.data.flush()?;
-        self.offsets.flush()?;
-        if let Some(valid) = &mut self.valid {
-            if self.used > 0 {
-                valid.write_all(&[self.bits])?;
-            }
-            valid.flush()?;
-        }
-        Ok(())
-    }
-}
-struct UserWriter {
-    dir: PathBuf,
-    id: StringColumn,
-    day: BufWriter<File>,
-    sessions: BufWriter<File>,
-    events: BufWriter<File>,
-    revenue: BufWriter<File>,
-    category: StringColumn,
-    count: u64,
-}
-impl UserWriter {
-    fn new(dir: PathBuf) -> io::Result<Self> {
-        make_dir(&dir)?;
-        Ok(Self {
-            id: StringColumn::new(&dir, "user_id", false)?,
-            day: writer(&dir.join("day.i32"))?,
-            sessions: writer(&dir.join("sessions.i64"))?,
-            events: writer(&dir.join("events.i64"))?,
-            revenue: writer(&dir.join("revenue_cents.i64"))?,
-            category: StringColumn::new(&dir, "top_category", true)?,
-            dir,
-            count: 0,
-        })
-    }
-    fn push(
-        &mut self,
-        id: &[u8],
-        day: i32,
-        sessions: i64,
-        events: i64,
-        revenue: i64,
-        category: Option<&[u8]>,
-    ) -> io::Result<()> {
-        self.id.push(Some(id))?;
-        self.day.write_all(&day.to_le_bytes())?;
-        self.sessions.write_all(&sessions.to_le_bytes())?;
-        self.events.write_all(&events.to_le_bytes())?;
-        self.revenue.write_all(&revenue.to_le_bytes())?;
-        self.category.push(category)?;
-        self.count += 1;
-        Ok(())
-    }
-    fn finish(mut self) -> io::Result<u64> {
-        self.id.finish()?;
-        self.category.finish()?;
-        self.day.flush()?;
-        self.sessions.flush()?;
-        self.events.flush()?;
-        self.revenue.flush()?;
-        let count_path = self.dir.join("count.txt");
-        fs::write(&count_path, self.count.to_string())
-            .map_err(|error| io_context(error, &count_path))?;
-        Ok(self.count)
-    }
 }
 #[derive(Default, Clone, Copy)]
 struct CampaignAgg {
@@ -799,35 +772,22 @@ impl CampaignTotals {
         }
     }
 }
-fn write_campaigns(dir: PathBuf, rows: CampaignMap, catalog: &Catalog<'_>) -> io::Result<usize> {
-    make_dir(&dir)?;
-    let mut id = StringColumn::new(&dir, "campaign_id", false)?;
-    let mut channel = StringColumn::new(&dir, "channel", false)?;
-    let mut day = writer(&dir.join("day.i32"))?;
-    let mut sessions = writer(&dir.join("sessions.i64"))?;
-    let mut purchasing = writer(&dir.join("purchasing_sessions.i64"))?;
-    let mut revenue = writer(&dir.join("revenue_cents.i64"))?;
-    let mut assisted = writer(&dir.join("assisted_sessions.i64"))?;
+fn write_campaigns(path: PathBuf, rows: CampaignMap, catalog: &Catalog<'_>) -> io::Result<usize> {
     let count = rows.len();
+    let mut writer = CampaignWriter::new(path)?;
     for ((c, d), r) in rows {
-        let (name, ch) = catalog.campaign_values[c as usize];
-        id.push(Some(name))?;
-        channel.push(Some(ch))?;
-        day.write_all(&d.to_le_bytes())?;
-        sessions.write_all(&r.sessions.to_le_bytes())?;
-        purchasing.write_all(&r.purchasing.to_le_bytes())?;
-        revenue.write_all(&r.revenue.to_le_bytes())?;
-        assisted.write_all(&r.assisted.to_le_bytes())?;
+        let (name, channel) = catalog.campaign_values[c as usize];
+        writer.push(
+            name,
+            channel,
+            d,
+            r.sessions,
+            r.purchasing,
+            r.revenue,
+            r.assisted,
+        )?;
     }
-    id.finish()?;
-    channel.finish()?;
-    day.flush()?;
-    sessions.flush()?;
-    purchasing.flush()?;
-    revenue.flush()?;
-    assisted.flush()?;
-    let count_path = dir.join("count.txt");
-    fs::write(&count_path, count.to_string()).map_err(|error| io_context(error, &count_path))?;
+    writer.finish()?;
     Ok(count)
 }
 
@@ -1027,9 +987,27 @@ fn process_partition(
 fn run() -> io::Result<()> {
     let began = Instant::now();
     let data = PathBuf::from(std::env::var_os("DATA_DIR").unwrap_or_else(|| "/data".into()));
-    let scratch =
-        PathBuf::from(std::env::var_os("SCRATCH_DIR").unwrap_or_else(|| "/scratch".into()));
-    let out = scratch.join("native-output");
+    let out = PathBuf::from(std::env::var_os("OUTPUT_DIR").unwrap_or_else(|| "/output".into()));
+    for table in ["user_daily", "campaign_daily"] {
+        let folder = out.join(table);
+        if folder.is_dir() {
+            for entry in fs::read_dir(&folder)? {
+                if entry?
+                    .path()
+                    .extension()
+                    .is_some_and(|ext| ext == "parquet")
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::AlreadyExists,
+                        format!(
+                            "Use a fresh OUTPUT_DIR: {} contains Parquet files",
+                            folder.display()
+                        ),
+                    ));
+                }
+            }
+        }
+    }
     make_dir(&out)?;
     // Create shared parents before parallel workers create their disjoint parts.
     make_dir(&out.join("user_daily"))?;
@@ -1061,7 +1039,7 @@ fn run() -> io::Result<()> {
     let event_data = load_files(&csv_paths(&data.join("events"))?, ncpu)?;
     // Tiny fixtures need one part, not dozens of empty files. Full datasets
     // retain four independent partitions per CPU for balanced work queues.
-    let event_bytes: usize = event_data.iter().map(Vec::len).sum();
+    let event_bytes: usize = event_data.iter().map(|f| f.len()).sum();
     let partitions = (event_bytes / CHUNK).clamp(1, ncpu * 4);
     let event_tasks = chunks(&event_data);
     let raw = parse_events(
@@ -1178,6 +1156,81 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn digits_match_checked_reference_at_numeric_boundaries() {
+        fn reference(bytes: &[u8]) -> Option<i64> {
+            if bytes.is_empty() {
+                return None;
+            }
+            let mut n = 0i64;
+            for &b in bytes {
+                if !b.is_ascii_digit() {
+                    return None;
+                }
+                n = n.checked_mul(10)?.checked_add((b - b'0') as i64)?;
+            }
+            Some(n)
+        }
+        for value in [
+            "",
+            "0",
+            "000",
+            "9223372036854775807",
+            "9223372036854775808",
+            "18446744073709551615",
+            "000000000000000000000000001791071890000",
+            "000000000000000000000000000000000x",
+        ] {
+            assert_eq!(digits(value.as_bytes()), reference(value.as_bytes()));
+        }
+        for pos in 0..19 {
+            for byte in 0..=255u8 {
+                let mut value = *b"1791071890000123456";
+                value[pos] = byte;
+                assert_eq!(digits(&value), reference(&value), "{value:?}");
+            }
+        }
+    }
+    #[test]
+    fn event_dedup_keeps_exact_ids_and_invalid_earliest_under_forced_hash_collision() {
+        let later = Raw {
+            hash: 42,
+            id: b"x",
+            person: b"u",
+            ingest: 200,
+            ts: 10,
+            revenue: 1,
+            category: 0,
+        };
+        let earliest_invalid = Raw {
+            ingest: 100,
+            person: b"",
+            ..later
+        };
+        let other = Raw {
+            hash: 42,
+            id: b"y",
+            person: b"v",
+            ingest: 150,
+            ts: 20,
+            revenue: 7,
+            category: 0,
+        };
+        let other_later = Raw {
+            ingest: 180,
+            revenue: 9,
+            ..other
+        };
+        let output = dedup_events(
+            vec![vec![vec![later, other_later, earliest_invalid, other]]],
+            1,
+            1,
+        );
+        let kept: Vec<_> = output.into_iter().flatten().flatten().collect();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].person, b"v");
+        assert_eq!(kept[0].revenue, 7);
+    }
     fn event(hash: u64, person: &'static [u8], ts: i64) -> Event<'static> {
         Event {
             hash,

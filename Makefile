@@ -21,4 +21,4 @@ run-dev: build
 check-dev:
 	python3 scripts/compare.py out $(ANSWER)
 native:
-	cargo build --release --locked --offline
+	cargo build --release --locked
