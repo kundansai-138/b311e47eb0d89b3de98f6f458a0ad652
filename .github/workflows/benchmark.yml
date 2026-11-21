@@ -22,11 +22,11 @@ jobs:
         run: |
           cargo build --release --locked --offline --manifest-path tests/generator/Cargo.toml
           tests/generator/target/release/generate --seed 818 --events 20000000 --clicks 5000000 --threads 4 --output /tmp/shopping-data
-      - name: Rotate three runs and compare every output row
+      - name: Rotate seven runs and compare every output row
         run: |
           mkdir benchmark-results
           lscpu > benchmark-results/cpu.txt
-          python tests/benchmark.py /tmp/shopping-data benchmark-results --repeats 3
+          python tests/benchmark.py /tmp/shopping-data benchmark-results --repeats 7
       - uses: actions/upload-artifact@v4
         if: always()
         with:
