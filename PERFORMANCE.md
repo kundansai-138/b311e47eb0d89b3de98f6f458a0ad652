@@ -14,7 +14,7 @@ The final median is 15.8% lower than the original implementation. All 2,245,254 
 
 Results: https://github.com/kundansai-138/shopping-sessions/actions/runs/44840582741
 
-Machine-readable results are in `validation/linux-benchmark.json`. These are controlled comparisons on one GitHub runner, not competition scorer results. The scorer uses different CPUs and an 8-vCPU allocation, so its absolute timing can differ. 
+Machine-readable results are in `validation/linux-benchmark.json`. These are controlled comparisons on one GitHub runner, not competition scorer results. The scorer uses different CPUs and an 8-vCPU allocation, so its absolute timing can differ.
 ## Full-size Linux regression
 
 The same optimized runtime completed the official generator's seed 42 dataset with 60,000,000 events and 15,000,000 clicks in **28.998 seconds**. This was one run with a four-CPU quota, eight worker threads, a hard 12 GiB memory limit, and no swap. Peak cgroup memory, including charged filesystem cache, was **11,138,543,616 bytes (10.37 GiB)**. Output plus scratch used 650,019,463 bytes (0.61 GiB).
