@@ -1,4 +1,4 @@
-name: Compare compact IDs and partition sizes
+name: Compare parsing and copying finalists
 on:
   workflow_dispatch:
 permissions:
@@ -16,7 +16,7 @@ jobs:
       - name: Build exact baseline and isolated candidates
         run: |
           timeout 600 docker build -t shopping-sessions:baseline .
-          for variant in combined inline; do
+          for variant in inline reserve csv chunk nohash identity; do
             timeout 600 docker build -t shopping-sessions:$variant .bench/$variant
           done
       - name: Generate official twenty-million-event dataset

@@ -298,7 +298,9 @@ fn load_file(path: &Path) -> io::Result<InputFile> {
     }
     // SAFETY: the scorer mounts /data read-only and does not change these files.
     // The mapping owns the lifetime of all slices returned from this InputFile.
-    let map = unsafe { memmap2::MmapOptions::new().populate().map(&file)? };
+    let mut options = memmap2::MmapOptions::new();
+    if std::env::var("ROUND2_MMAP_MODE").as_deref() != Ok("lazy") { options.populate(); }
+    let map = unsafe { options.map(&file)? };
     Ok(InputFile::Mapped(map))
 }
 fn load_files(paths: &[PathBuf], ncpu: usize) -> io::Result<Vec<InputFile>> {
@@ -1176,8 +1178,7 @@ fn run() -> io::Result<()> {
     // Tiny fixtures need one part, not dozens of empty files. Full datasets
     // retain four independent partitions per CPU for balanced work queues.
     let event_bytes: usize = event_data.iter().map(|f| f.len()).sum();
-    let partition_factor = std::env::var("ROUND2_PARTITION_FACTOR").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(4).clamp(1,64);
-    let partitions = (event_bytes / CHUNK).clamp(1, ncpu * partition_factor);
+    let partitions = (event_bytes / CHUNK).clamp(1, ncpu * 16);
     let event_tasks = chunks(&event_data);
     let parsed = parse_events(
         &event_tasks,
