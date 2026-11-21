@@ -31,7 +31,7 @@ jobs:
           cargo build --release --locked --manifest-path tests/generator/Cargo.toml
           tests/generator/target/release/generate --seed 818 --events 20000000 --clicks 5000000 --threads 4 --output /tmp/shopping-data
           lscpu > profile-results/cpu.txt
-          perf=$(find /usr/lib/linux-tools -name perf -type f | head -1)
+          perf=$(find /usr/lib -path '*/linux-tools*/*' -name perf -type f | head -1)
           "$perf" version | tee profile-results/perf-version.txt
           export DATA_DIR=/tmp/shopping-data OUTPUT_DIR=/tmp/shopping-output SCRATCH_DIR=/tmp/shopping-scratch NCPU=8 MEM_GB=12
           "$perf" record -e cpu-clock -F 999 -o profile-results/perf.data --call-graph dwarf,4096 -- /tmp/shopping-sessions 2> profile-results/runtime.log
