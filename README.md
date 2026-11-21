@@ -16,7 +16,7 @@ python3 tests/generate_cases.py --output scratch/adversarial
 python3 scripts/run_fixtures.py scratch/adversarial -- sh scripts/docker_run.sh
 ```
 
-The wrapper applies a read-only root, UID 1000, no network, a 64 MB `/tmp`, eight CPUs, 24 GB memory with no swap, and separate data/output/scratch mounts. Its resource defaults can be overridden with `CPUS` and `MEM`. The GitHub Actions workflow builds and tests the Linux container using smaller limits for the tiny fixture datasets; a successful local native run alone does not certify the container.
+The wrapper applies a read-only root, UID 1000, no network, a 64 MB `/tmp`, eight CPUs, 24 GB memory with no swap, and separate data/output/scratch mounts. Override the CPU quota with `CPUS`, memory with `MEM`, and worker count with `WORKERS` (defaults to the integer CPU quota). The GitHub Actions workflow builds and tests the Linux container using smaller quotas; a successful local native run alone does not certify the container.
 
 Generate the public development input using the bundled copy of the supplied generator, then compare with the separately supplied answer:
 

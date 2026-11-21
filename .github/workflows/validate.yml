@@ -46,4 +46,4 @@ jobs:
         run: |
           python tests/generate_id_cases.py --output /tmp/exact-ids --large
           CPUS=1 MEM=5g python scripts/run_fixtures.py /tmp/exact-ids -- sh scripts/docker_run.sh
-          CPUS=8 MEM=5g python scripts/run_fixtures.py /tmp/exact-ids -- sh scripts/docker_run.sh
+          CPUS=2 WORKERS=8 MEM=5g python scripts/run_fixtures.py /tmp/exact-ids -- sh scripts/docker_run.sh
