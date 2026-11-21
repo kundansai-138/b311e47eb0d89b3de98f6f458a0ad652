@@ -3,7 +3,7 @@
 
 Runtime `25f02ed9dc93fc021d340917d05c40785d7a1fe1`: controlled 20M median **2.652034s**, versus **2.752569s** for `55c31f8`; **3.65% lower than the previous submission on the same runner**.
 
-7 rotated runs per image, 4 CPU quota, 8 workers, 12 GiB memory, no swap/network, UID1000, read-only root and 64 MiB `/tmp`.
+7 rotated runs per image, 4 CPU quota, 8 workers, 12 GiB memory, no swap/network, UID 1000, read-only root and 64 MiB `/tmp`. CPU: Intel Xeon Platinum 8573C.
 
 | Variant | Run 1 | Run 2 | Run 3 | Run 4 | Run 5 | Run 6 | Run 7 | Median |
 | --- |  ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -11,7 +11,7 @@ Runtime `25f02ed9dc93fc021d340917d05c40785d7a1fe1`: controlled 20M median **2.65
 | `reference` | 2.657385s | 2.632314s | 2.656721s | 2.637131s | 2.687816s | 2.646421s | 2.690782s | **2.656721s** |
 | `optimized` | 2.664667s | 2.645637s | 2.595882s | 2.670387s | 2.647297s | 2.652034s | 2.742448s | **2.652034s** |
 
-The selected Rust 1.100.0 PGO runtime uses compact CSV separator masks, bounded short-ID loads, and exact integer-key catalog dictionaries. Packed-event sorting selects the C++ AVX 512 kernel when every required CPU/OS feature is available, with checked AVX 2 and Rust fallbacks. The simpler AVX 2 CSV iterator was retained after the fused/wider parser tied it in production comparisons. Independent workers, global earliest-ingest deduplication, strict validation, and exact fallback identifiers remain intact.
+The selected Rust 1.100.0 PGO runtime uses compact CSV separator masks, bounded short-ID loads, and exact integer-key catalog dictionaries. Packed-event sorting selects the C++ AVX512 kernel when every required CPU/OS feature is available, with checked AVX2 and Rust fallbacks. The simpler AVX2 CSV iterator was retained after the fused/wider parser performed similarly in production comparisons. Independent workers, global earliest-ingest deduplication, strict validation, and exact fallback identifiers remain intact.
 
 The separate 60M-event/15M-click regression completed in **9.507144s**, with 4 CPU quota, 8 workers and a hard 12 GiB limit. Peak cgroup memory was **4,187,877,376 bytes (3.90 GiB)**; output plus scratch used 287,360,157 bytes. Every output row matched the retained baseline digests. This is a resource/correctness regression; no cross-host 60M speedup is inferred.
 

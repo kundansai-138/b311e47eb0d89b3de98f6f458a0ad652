@@ -5,7 +5,7 @@
 
 Runtime `25f02ed9dc93fc021d340917d05c40785d7a1fe1`: controlled 20M median **2.652034s**, versus **2.752569s** for `55c31f8`; **3.65% lower than the previous submission on the same runner**.
 
-The selected Rust 1.100.0 PGO runtime uses compact CSV separator masks, bounded short-ID loads, and exact integer-key catalog dictionaries. Packed-event sorting selects the C++ AVX 512 kernel when every required CPU/OS feature is available, with checked AVX 2 and Rust fallbacks. The simpler AVX 2 CSV iterator was retained after the fused/wider parser tied it in production comparisons. Independent workers, global earliest-ingest deduplication, strict validation, and exact fallback identifiers remain intact.
+The selected Rust 1.100.0 PGO runtime uses compact CSV separator masks, bounded short-ID loads, and exact integer-key catalog dictionaries. Packed-event sorting selects the C++ AVX512 kernel when every required CPU/OS feature is available, with checked AVX2 and Rust fallbacks. The simpler AVX2 CSV iterator was retained after the fused/wider parser performed similarly in production comparisons. Independent workers, global earliest-ingest deduplication, strict validation, and exact fallback identifiers remain intact.
 
 The user reported 1.68 seconds for the preceding submission on the leaderboard. These GitHub runner timings do not establish a new leaderboard score.
 
