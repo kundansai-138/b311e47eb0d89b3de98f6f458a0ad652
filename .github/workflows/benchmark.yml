@@ -1,4 +1,4 @@
-name: Compare Linux performance
+name: Compare round-two Linux candidates
 on:
   workflow_dispatch:
 permissions:
@@ -6,29 +6,30 @@ permissions:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
-      - name: Build baseline and current images
+      - name: Build exact baseline and isolated candidates
         run: |
-          mkdir /tmp/shopping-baseline
-          git archive 38cd60db715d1ecb9434e58578ae90fff4c8fd35 | tar -x -C /tmp/shopping-baseline
-          timeout 600 docker build -t shopping-sessions:baseline /tmp/shopping-baseline
-          timeout 600 docker build -t shopping-sessions:optimized .
-      - name: Generate twenty-million-event dataset
+          timeout 600 docker build -t shopping-sessions:baseline .
+          for variant in dedup timestamps layout aes; do
+            timeout 600 docker build -t shopping-sessions:$variant .bench/$variant
+          done
+      - name: Generate official twenty-million-event dataset
         run: |
           cargo build --release --locked --offline --manifest-path tests/generator/Cargo.toml
           tests/generator/target/release/generate --seed 818 --events 20000000 --clicks 5000000 --threads 4 --output /tmp/shopping-data
-      - name: Alternate five runs per image and compare all output rows
-        run: python tests/benchmark.py /tmp/shopping-data benchmark-results --repeats 5
+      - name: Rotate three runs per candidate with eight workers
+        run: |
+          mkdir benchmark-results
+          lscpu > benchmark-results/cpu.txt
+          python tests/benchmark.py /tmp/shopping-data benchmark-results --repeats 3
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: linux-benchmark
+          name: round2-linux-candidates
           path: benchmark-results/

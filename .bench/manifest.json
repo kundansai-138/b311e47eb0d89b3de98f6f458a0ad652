@@ -1,0 +1,10 @@
+{
+  "baseline_commit": "05a1cf788aa499b9c2d3fbaf2f03a437695d2749",
+  "variants": [
+    "baseline",
+    "dedup",
+    "timestamps",
+    "layout",
+    "aes"
+  ]
+}
