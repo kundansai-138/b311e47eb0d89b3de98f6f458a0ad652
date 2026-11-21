@@ -1,0 +1,46 @@
+name: Profile current exact pipeline
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare sampling tools and symbolized build
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y linux-tools-generic
+          sudo sysctl kernel.perf_event_paranoid=-1
+          sudo sysctl kernel.kptr_restrict=0
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('Dockerfile')
+          p.write_text(p.read_text().replace('WORKDIR /build', 'WORKDIR /build\nENV CARGO_PROFILE_RELEASE_STRIP=false CARGO_PROFILE_RELEASE_DEBUG=1'))
+          PY
+          docker build --target normal -t shopping-profile .
+          id=$(docker create shopping-profile)
+          docker cp "$id:/app/shopping-sessions" /tmp/shopping-sessions
+          docker rm "$id"
+          chmod +x /tmp/shopping-sessions
+      - name: Generate input and collect CPU samples
+        run: |
+          mkdir profile-results /tmp/shopping-output /tmp/shopping-scratch
+          cargo build --release --locked --manifest-path tests/generator/Cargo.toml
+          tests/generator/target/release/generate --seed 818 --events 20000000 --clicks 5000000 --threads 4 --output /tmp/shopping-data
+          lscpu > profile-results/cpu.txt
+          perf=$(find /usr/lib/linux-tools -name perf -type f | head -1)
+          "$perf" version | tee profile-results/perf-version.txt
+          export DATA_DIR=/tmp/shopping-data OUTPUT_DIR=/tmp/shopping-output SCRATCH_DIR=/tmp/shopping-scratch NCPU=8 MEM_GB=12
+          "$perf" record -e cpu-clock -F 999 -o profile-results/perf.data --call-graph dwarf,4096 -- /tmp/shopping-sessions 2> profile-results/runtime.log
+          "$perf" report -i profile-results/perf.data --stdio --no-children --percent-limit 0.3 > profile-results/report.txt
+          "$perf" report -i profile-results/perf.data --stdio --no-children --sort symbol --percent-limit 0.3 > profile-results/symbols.txt
+          "$perf" script -i profile-results/perf.data > profile-results/stacks.txt
+          rm profile-results/perf.data
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: round4-profile
+          path: profile-results/
