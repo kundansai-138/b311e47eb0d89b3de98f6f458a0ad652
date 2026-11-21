@@ -21,7 +21,13 @@ def main():
     args.report.mkdir(parents=True, exist_ok=True)
     threads = 8
     quota = min(4, len(os.sched_getaffinity(0)))
-    variants = ["baseline", "architecture", "parser", "inline", "architecture1024"]
+    variants = ["baseline", "catalog", "combined", "vector_avx2", "vector_sort", "vector_parser", "vector"]
+    environments = {
+        "vector_avx2": ["SHOP_SORT_BACKEND=avx2", "ROUND4_CSV_SIMD=avx2"],
+        "vector_sort": ["SHOP_SORT_BACKEND=avx512", "ROUND4_CSV_SIMD=avx2"],
+        "vector_parser": ["SHOP_SORT_BACKEND=avx2", "ROUND4_CSV_SIMD=avx512"],
+        "vector": ["SHOP_SORT_BACKEND=avx512", "ROUND4_CSV_SIMD=avx512"],
+    }
     records = []
     first_outputs = {}
     with tempfile.TemporaryDirectory(prefix="shopping-benchmark-", ignore_cleanup_errors=True) as temp:
@@ -45,7 +51,7 @@ def main():
                        "-v", f"{output}:/output", "-v", f"{scratch}:/scratch",
                        "-e", "DATA_DIR=/data", "-e", "OUTPUT_DIR=/output", "-e", "SCRATCH_DIR=/scratch",
                        "-e", "HOME=/scratch", "-e", f"NCPU={threads}", "-e", "MEM_GB=12",
-                       *(["-e", "ROUND4_EVENT_BATCH=1024"] if variant == "architecture1024" else [])] + [f"shopping-sessions:{'architecture' if variant == 'architecture1024' else variant}"]
+                       *[item for setting in environments.get(variant, []) for item in ("-e", setting)], f"shopping-sessions:{'vector' if variant.startswith('vector') else variant}"]
                 log = args.report / f"{variant}-{repetition}.log"
                 try:
                     with log.open("w") as handle:
