@@ -21,13 +21,11 @@ def main():
     args.report.mkdir(parents=True, exist_ok=True)
     threads = 8
     quota = min(4, len(os.sched_getaffinity(0)))
-    variants = ["baseline", "catalog", "combined", "vector_avx2", "vector_sort", "vector_parser", "vector"]
-    environments = {
-        "vector_avx2": ["SHOP_SORT_BACKEND=avx2", "ROUND4_CSV_SIMD=avx2"],
-        "vector_sort": ["SHOP_SORT_BACKEND=avx512", "ROUND4_CSV_SIMD=avx2"],
-        "vector_parser": ["SHOP_SORT_BACKEND=avx2", "ROUND4_CSV_SIMD=avx512"],
-        "vector": ["SHOP_SORT_BACKEND=avx512", "ROUND4_CSV_SIMD=avx512"],
-    }
+    variants = ["baseline", "vector_sort", "fused_avx2", "fused", "fusedpreload", "fused_new"]
+    environments = {variant: ["SHOP_SORT_BACKEND=avx512", "ROUND4_CSV_SIMD=avx512"] for variant in variants if variant != "baseline"}
+    environments["vector_sort"] = ["SHOP_SORT_BACKEND=avx512", "ROUND4_CSV_SIMD=avx2"]
+    environments["fused_avx2"] = ["SHOP_SORT_BACKEND=avx512", "ROUND4_CSV_SIMD=avx2"]
+    images = {"vector_sort": "vector", "fused_avx2": "fused"}
     records = []
     first_outputs = {}
     with tempfile.TemporaryDirectory(prefix="shopping-benchmark-", ignore_cleanup_errors=True) as temp:
@@ -51,7 +49,7 @@ def main():
                        "-v", f"{output}:/output", "-v", f"{scratch}:/scratch",
                        "-e", "DATA_DIR=/data", "-e", "OUTPUT_DIR=/output", "-e", "SCRATCH_DIR=/scratch",
                        "-e", "HOME=/scratch", "-e", f"NCPU={threads}", "-e", "MEM_GB=12",
-                       *[item for setting in environments.get(variant, []) for item in ("-e", setting)], f"shopping-sessions:{'vector' if variant.startswith('vector') else variant}"]
+                       *[item for setting in environments.get(variant, []) for item in ("-e", setting)], f"shopping-sessions:{images.get(variant, variant)}"]
                 log = args.report / f"{variant}-{repetition}.log"
                 try:
                     with log.open("w") as handle:
@@ -76,7 +74,7 @@ def main():
             print(f"{table}: all {tables[0].num_rows} rows exactly equal", flush=True)
         medians = {v: statistics.median(r["seconds"] for r in records if r["variant"] == v)
                    for v in variants}
-        report = {"baseline_commit": "55c31f8825654cabcfbf7ab4888116e9e93d6183", "build_mode": "ordinary identical Rust1.90 x86-64-v3",
+        report = {"baseline_commit": "55c31f8825654cabcfbf7ab4888116e9e93d6183", "build_mode": "ordinary x86-64-v3; Rust1.90 except fused_new Rust1.100.0",
                   "candidate_commit": os.environ.get("GITHUB_SHA", "local"), "threads": threads, "cpu_quota": quota, "memory_limit_bytes": 12*1024**3, "runs": records,
                   "medians_seconds": medians, "speedups": {v:medians["baseline"]/medians[v] for v in variants},
                   "exact_output_match": True}
