@@ -51,3 +51,10 @@ jobs:
         run: |
           python tests/generate_layout_cases.py --output /tmp/layout-cases --writer
           CPUS=1 MEM=5g python scripts/run_fixtures.py /tmp/layout-cases -- sh scripts/docker_run.sh
+      - name: Exact catalog domains and explicit AVX2 fallback
+        run: |
+          lscpu
+          python tests/generate_catalog_cases.py --output /tmp/catalog-cases
+          CPUS=2 WORKERS=8 MEM=5g python scripts/run_fixtures.py /tmp/catalog-cases -- sh scripts/docker_run.sh
+          SHOP_CSV_BACKEND=avx2 SHOP_SORT_BACKEND=avx2 CPUS=2 MEM=5g python scripts/run_fixtures.py fixtures -- sh scripts/docker_run.sh
+          SHOP_CSV_BACKEND=avx2 SHOP_SORT_BACKEND=avx2 CPUS=2 MEM=5g python scripts/run_fixtures.py /tmp/catalog-cases -- sh scripts/docker_run.sh

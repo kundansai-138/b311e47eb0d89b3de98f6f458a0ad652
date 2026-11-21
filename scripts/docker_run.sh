@@ -31,4 +31,5 @@ docker run --rm --platform "$PLATFORM" \
   -v "$DATA":/data:ro,z -v "$OUT":/output:z -v "$SCRATCH":/scratch:z \
   -e DATA_DIR=/data -e OUTPUT_DIR=/output -e SCRATCH_DIR=/scratch -e HOME=/scratch \
   -e NCPU="$WORKERS" -e MEM_GB="${MEM%g}" \
+  -e SHOP_CSV_BACKEND -e SHOP_SORT_BACKEND \
   "$IMAGE"

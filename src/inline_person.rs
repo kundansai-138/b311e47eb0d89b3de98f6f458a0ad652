@@ -58,9 +58,18 @@ pub fn encode(name: &[u8]) -> Option<u64> {
         // including at the final page of a read-only mapped input file.
         u64::from_le_bytes(name[..8].try_into().unwrap())
     } else {
-        let mut bytes = [0; 8];
-        bytes[..len].copy_from_slice(name);
-        u64::from_le_bytes(bytes)
+        // Bounded overlapping loads assemble exactly the available bytes.
+        // The repeated overlap agrees byte-for-byte; OR adds no new bits.
+        if len >= 4 {
+            let low = u32::from_le_bytes(name[..4].try_into().unwrap()) as u64;
+            let high = u32::from_le_bytes(name[len - 4..].try_into().unwrap()) as u64;
+            low | (high << ((len - 4) * 8))
+        } else if len >= 2 {
+            let low = u16::from_le_bytes(name[..2].try_into().unwrap()) as u64;
+            low | ((name[len - 1] as u64) << ((len - 1) * 8))
+        } else {
+            name[0] as u64
+        }
     };
     if word & !ASCII_MASK != 0 {
         return None;

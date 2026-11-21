@@ -6,11 +6,15 @@ enum Backend {
     Rust,
     #[cfg(vqsort_native)]
     Avx2,
+    #[cfg(all(vqsort_native, feature = "vqsort-avx512"))]
+    Avx512,
 }
 
 #[cfg(vqsort_native)]
 unsafe extern "C" {
     fn shopping_sort128_avx2(storage: *mut std::ffi::c_void, count: usize) -> i32;
+    #[cfg(feature = "vqsort-avx512")]
+    fn shopping_sort128_avx512(storage: *mut std::ffi::c_void, count: usize) -> i32;
 }
 
 #[cfg(vqsort_native)]
@@ -29,7 +33,26 @@ fn avx2_supported() -> bool {
         && std::is_x86_feature_detected!("pclmulqdq")
 }
 
+#[cfg(all(vqsort_native, feature = "vqsort-avx512"))]
+fn avx512_supported() -> bool {
+    avx2_supported()
+        && std::is_x86_feature_detected!("avx512f")
+        && std::is_x86_feature_detected!("avx512cd")
+        && std::is_x86_feature_detected!("avx512dq")
+        && std::is_x86_feature_detected!("avx512bw")
+        && std::is_x86_feature_detected!("avx512vl")
+}
+
 fn select_backend() -> Backend {
+    let requested = std::env::var("SHOP_SORT_BACKEND").unwrap_or_default();
+    if requested == "rust" {
+        return Backend::Rust;
+    }
+    #[cfg(all(vqsort_native, feature = "vqsort-avx512"))]
+    if requested != "avx2" && avx512_supported() {
+        return Backend::Avx512;
+    }
+    // Unsupported wider-vector CPUs retain the checked AVX2 path.
     #[cfg(vqsort_native)]
     if avx2_supported() {
         return Backend::Avx2;
@@ -47,6 +70,8 @@ pub fn backend_name() -> &'static str {
         Backend::Rust => "rust",
         #[cfg(vqsort_native)]
         Backend::Avx2 => "avx2",
+        #[cfg(all(vqsort_native, feature = "vqsort-avx512"))]
+        Backend::Avx512 => "avx512",
     }
 }
 
@@ -85,6 +110,8 @@ unsafe fn sort_with(storage: *mut u8, count: usize, selected: Backend) -> bool {
         let invoke = |pointer: *mut u8| unsafe {
             let result = match selected {
                 Backend::Avx2 => shopping_sort128_avx2(pointer.cast(), count),
+                #[cfg(feature = "vqsort-avx512")]
+                Backend::Avx512 => shopping_sort128_avx512(pointer.cast(), count),
                 Backend::Rust => unreachable!(),
             };
             result == 1
@@ -117,6 +144,10 @@ mod tests {
         let mut backends = Vec::new();
         if avx2_supported() {
             backends.push(Backend::Avx2);
+        }
+        #[cfg(feature = "vqsort-avx512")]
+        if avx512_supported() {
+            backends.push(Backend::Avx512);
         }
         backends
     }
@@ -208,7 +239,7 @@ mod tests {
     }
 
     #[test]
-    fn native_sort_is_thread_local_and_disabled_backend_does_not_mutate() {
+    fn native_sort_is_thread_local_and_rust_request_does_not_mutate() {
         for selected in available() {
             std::thread::scope(|scope| {
                 for seed in 1..=8 {

@@ -22,7 +22,7 @@ bytes = "1.10"
 memmap2 = "=0.9.12"
 
 [features]
-default = ["fast-csv", "fast-hash", "fast-digits", "cached-time", "trusted-ingest", "row-csv", "swar-clock", "swar-digits", "vqsort"]
+default = ["fast-csv", "fast-hash", "fast-digits", "cached-time", "trusted-ingest", "row-csv", "swar-clock", "swar-digits", "vqsort", "vqsort-avx512"]
 fast-csv = []
 fast-hash = []
 fast-digits = []
@@ -36,3 +36,5 @@ swar-clock = ["cached-time"]
 swar-digits = ["fast-digits"]
 
 vqsort = []
+
+vqsort-avx512 = ["vqsort"]

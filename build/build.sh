@@ -4,7 +4,7 @@ set -eu
 cd /build
 mode=${1:?normal or pgo required}
 case "$mode" in normal|pgo) ;; *) echo "Invalid build mode: $mode" >&2; exit 2 ;; esac
-case "$(rustc --version)" in 'rustc 1.90.0 '*) ;; *) echo 'Expected Rust 1.90.0' >&2; exit 2 ;; esac
+case "$(rustc --version)" in 'rustc 1.100.0 '*) ;; *) echo 'Expected Rust 1.100.0' >&2; exit 2 ;; esac
 host=$(rustc -vV | sed -n 's/^host: //p')
 case "$host" in x86_64-unknown-linux-gnu) ;; *) echo 'Build with --platform linux/amd64' >&2; exit 2 ;; esac
 bin=shopping-sessions

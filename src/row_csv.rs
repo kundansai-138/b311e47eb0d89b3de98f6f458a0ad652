@@ -24,6 +24,33 @@ unsafe fn masks64(ptr: *const u8) -> (u64, u64, u64) {
     )
 }
 
+/// The mask kernel needs precisely AVX512F and AVX512BW. Rust's feature
+/// detection also checks the OS's opmask/ZMM register-state support.
+#[inline]
+fn avx512_available() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        std::is_x86_feature_detected!("avx512f") && std::is_x86_feature_detected!("avx512bw")
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        false
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f,avx512bw")]
+#[inline]
+unsafe fn masks64_avx512(ptr: *const u8) -> (u64, u64, u64) {
+    use std::arch::x86_64::*;
+    // The caller proves that all64 bytes are inside the input slice.
+    let bytes = _mm512_loadu_si512(ptr.cast());
+    let lines = _mm512_cmpeq_epi8_mask(bytes, _mm512_set1_epi8(b'\n' as i8));
+    let commas = _mm512_cmpeq_epi8_mask(bytes, _mm512_set1_epi8(b',' as i8));
+    let quotes = _mm512_cmpeq_epi8_mask(bytes, _mm512_set1_epi8(b'"' as i8));
+    (commas | lines, quotes, lines)
+}
+
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "bmi2")]
 unsafe fn extract(bits: u128, mask: u128) -> u64 {
@@ -39,6 +66,7 @@ pub struct Rows<'a, const N: usize> {
     bytes: &'a [u8],
     position: usize,
     fast: bool,
+    avx512: bool,
     fallback: fast_csv::Rows<'a, N>,
 }
 impl<'a, const N: usize> Rows<'a, N> {
@@ -53,6 +81,10 @@ impl<'a, const N: usize> Rows<'a, N> {
             bytes,
             position: 0,
             fast,
+            // Select a supported vector width once per input chunk.
+            avx512: fast
+                && avx512_available()
+                && std::env::var("SHOP_CSV_BACKEND").as_deref() != Ok("avx2"),
             fallback: fast_csv::Rows::new(bytes),
         }
     }
@@ -64,10 +96,11 @@ impl<'a, const N: usize> Rows<'a, N> {
         row
     }
 }
-impl<'a, const N: usize> Iterator for Rows<'a, N> {
-    type Item = [&'a [u8]; N];
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
+impl<'a, const N: usize> Rows<'a, N> {
+    // Called only by the guarded Iterator dispatch or a matching target-feature
+    // chunk loop. Always-inline keeps extraction and its row callback together.
+    #[inline(always)]
+    unsafe fn next_impl<const WIDE: bool>(&mut self) -> Option<[&'a [u8]; N]> {
         if !self.fast {
             return self.fallback.next();
         }
@@ -77,66 +110,147 @@ impl<'a, const N: usize> Iterator for Rows<'a, N> {
             if rest.len() < 64 {
                 return self.slow_row();
             }
-            // Both vector loads stay inside the supplied slice. A row is
-            // complete here only when an actual LF was found in those bytes.
-            let (s, q, l) = unsafe { masks64(rest.as_ptr()) };
-            let (mut separators, quotes, lines) = if l != 0 {
-                (s as u128, q as u128, l as u128)
+            let (s, q, l) = if WIDE {
+                unsafe { masks64_avx512(rest.as_ptr()) }
+            } else {
+                unsafe { masks64(rest.as_ptr()) }
+            };
+            let (mut low, high, quotes, end) = if l != 0 {
+                let through = l ^ l.wrapping_sub(1);
+                (
+                    s & through,
+                    0,
+                    (q & through) as u128,
+                    l.trailing_zeros() as usize,
+                )
             } else {
                 if rest.len() < 128 {
                     return self.slow_row();
                 }
-                let (s2, q2, l2) = unsafe { masks64(rest.as_ptr().add(64)) };
+                let (s2, q2, l2) = if WIDE {
+                    unsafe { masks64_avx512(rest.as_ptr().add(64)) }
+                } else {
+                    unsafe { masks64(rest.as_ptr().add(64)) }
+                };
                 if l2 == 0 {
                     return self.slow_row();
                 }
+                let through = l2 ^ l2.wrapping_sub(1);
                 (
-                    s as u128 | ((s2 as u128) << 64),
-                    q as u128 | ((q2 as u128) << 64),
-                    (l2 as u128) << 64,
+                    s,
+                    s2 & through,
+                    q as u128 | (((q2 & through) as u128) << 64),
+                    64 + l2.trailing_zeros() as usize,
                 )
             };
-            let end = lines.trailing_zeros() as usize;
-            let through_line = lines ^ (lines - 1);
-            separators &= through_line;
-            let quotes = quotes & through_line;
             let row_start = self.position;
             self.position += end + 1;
-            if end == 0 || separators.count_ones() as usize != N {
+            if end == 0 || low.count_ones() as usize + high.count_ones() as usize != N {
                 continue;
             }
-
             let mut quoted = 0;
             if quotes != 0 {
+                let separators = low as u128 | ((high as u128) << 64);
                 let starts = ((separators ^ (1u128 << end)) << 1) | 1;
                 let ends = separators >> 1;
-                // Every quote must be at a field boundary. A one-character
-                // quote field is invalid even though it is both boundaries.
                 if quotes & !(starts | ends) != 0 || quotes & starts & ends != 0 {
                     continue;
                 }
                 let opening = unsafe { extract(quotes, starts) };
-                // An empty first field has no preceding byte for its closing
-                // position. Insert its necessarily-zero flag explicitly.
-                let closing = unsafe { extract(quotes, ends) } << (separators as u64 & 1);
+                let closing = unsafe { extract(quotes, ends) } << (low & 1);
                 if opening != closing {
                     continue;
                 }
                 quoted = opening;
             }
-            let mut fields = [&[][..]; N];
+            // Exactly N separators through the first LF prove that every slot
+            // is initialized once. Monotone separator positions bound slices;
+            // quote validation proves a trimmed field has two distinct quotes.
+            let mut fields = std::mem::MaybeUninit::<[&'a [u8]; N]>::uninit();
+            let output = fields.as_mut_ptr().cast::<&'a [u8]>();
+            let base = unsafe { self.bytes.as_ptr().add(row_start) };
             let mut start = 0;
-            for slot in &mut fields {
-                let stop = separators.trailing_zeros() as usize;
+            let mut offset = 0;
+            for column in 0..N {
+                if low == 0 {
+                    low = high;
+                    offset = 64;
+                }
+                let stop = offset + low.trailing_zeros() as usize;
                 let trim = (quoted & 1) as usize;
-                *slot = &self.bytes[row_start + start + trim..row_start + stop - trim];
+                unsafe {
+                    output.add(column).write(std::slice::from_raw_parts(
+                        base.add(start + trim),
+                        stop - start - 2 * trim,
+                    ));
+                }
                 start = stop + 1;
-                separators &= separators - 1;
+                low &= low - 1;
                 quoted >>= 1;
             }
-            return Some(fields);
+            return Some(unsafe { fields.assume_init() });
         }
         None
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2,bmi2")]
+    unsafe fn for_each_avx2<F>(mut self, mut callback: F)
+    where
+        F: FnMut([&'a [u8]; N]),
+    {
+        while let Some(row) = self.next_impl::<false>() {
+            callback(row);
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx512f,avx512bw,avx2,bmi2")]
+    unsafe fn for_each_avx512<F>(mut self, mut callback: F)
+    where
+        F: FnMut([&'a [u8]; N]),
+    {
+        while let Some(row) = self.next_impl::<true>() {
+            callback(row);
+        }
+    }
+}
+
+impl<'a, const N: usize> Iterator for Rows<'a, N> {
+    type Item = [&'a [u8]; N];
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.fast {
+            return self.fallback.next();
+        }
+        // Both booleans are established by constructor CPUID/OS checks.
+        unsafe {
+            if self.avx512 {
+                self.next_impl::<true>()
+            } else {
+                self.next_impl::<false>()
+            }
+        }
+    }
+    #[inline]
+    fn for_each<F>(self, callback: F)
+    where
+        F: FnMut(Self::Item),
+    {
+        #[cfg(target_arch = "x86_64")]
+        if self.fast {
+            // Select the ISA once per complete input chunk. Each worker loop is
+            // monomorphized with the caller's exact closure (no function pointer).
+            unsafe {
+                if self.avx512 {
+                    self.for_each_avx512(callback);
+                } else {
+                    self.for_each_avx2(callback);
+                }
+            }
+            return;
+        }
+        self.fallback.for_each(callback);
     }
 }
 
@@ -153,6 +267,31 @@ mod tests {
             expected,
             "N={N}, input={bytes:?}"
         );
+        let mut avx2 = Rows::<N>::new(bytes);
+        avx2.avx512 = false;
+        assert_eq!(avx2.collect::<Vec<_>>(), expected, "forced AVX2 N={N}");
+        if avx512_available() {
+            let mut avx512 = Rows::<N>::new(bytes);
+            avx512.avx512 = true;
+            assert_eq!(avx512.collect::<Vec<_>>(), expected, "forced AVX512 N={N}");
+        }
+        let mut callback_avx2 = Rows::<N>::new(bytes);
+        callback_avx2.avx512 = false;
+        let mut callback_rows = Vec::new();
+        callback_avx2.for_each(|row| callback_rows.push(row));
+        assert_eq!(callback_rows, expected, "callback AVX2 N={N}");
+        if avx512_available() {
+            let mut callback_avx512 = Rows::<N>::new(bytes);
+            callback_avx512.avx512 = true;
+            let mut callback_rows = Vec::new();
+            callback_avx512.for_each(|row| callback_rows.push(row));
+            assert_eq!(callback_rows, expected, "callback AVX512 N={N}");
+        }
+        let mut callback_scalar = Rows::<N>::new(bytes);
+        callback_scalar.fast = false;
+        let mut callback_rows = Vec::new();
+        callback_scalar.for_each(|row| callback_rows.push(row));
+        assert_eq!(callback_rows, expected, "callback fallback N={N}");
         let mut scalar = Rows::<N>::new(bytes);
         scalar.fast = false;
         assert_eq!(scalar.collect::<Vec<_>>(), expected);
@@ -264,6 +403,47 @@ mod tests {
             check::<2>(&bytes);
             check::<4>(&bytes);
             check::<7>(&bytes);
+        }
+    }
+    #[test]
+    fn avx512_mask_kernel_matches_avx2_and_scalar_when_supported() {
+        let available = avx512_available();
+        if std::env::var("SHOP_REQUIRE_AVX512").as_deref() == Ok("1") {
+            assert!(
+                available,
+                "this run requires an actual AVX512F/BW-capable CPU"
+            );
+        }
+        if !available {
+            eprintln!("AVX512F/BW unavailable; guarded path not executed");
+            return;
+        }
+        #[cfg(target_arch = "x86_64")]
+        {
+            assert!(std::is_x86_feature_detected!("avx2"));
+            let mut data = [0u8; 192];
+            let mut state = 0x71e27a03514f92cbu64;
+            for seed in 0..512 {
+                for byte in &mut data {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    *byte = if seed < 256 { seed as u8 } else { state as u8 };
+                }
+                for offset in 0..64 {
+                    let bytes = &data[offset..offset + 64];
+                    let mut expected = (0u64, 0u64, 0u64);
+                    for (bit, &byte) in bytes.iter().enumerate() {
+                        expected.0 |= u64::from(byte == b',' || byte == b'\n') << bit;
+                        expected.1 |= u64::from(byte == b'"') << bit;
+                        expected.2 |= u64::from(byte == b'\n') << bit;
+                    }
+                    let actual = unsafe { masks64_avx512(bytes.as_ptr()) };
+                    assert_eq!(actual, expected, "seed={seed},offset={offset}");
+                    assert_eq!(actual, unsafe { masks64(bytes.as_ptr()) });
+                }
+            }
+            eprintln!("AVX512F/BW CSV mask path executed and matched scalar/AVX2");
         }
     }
 }

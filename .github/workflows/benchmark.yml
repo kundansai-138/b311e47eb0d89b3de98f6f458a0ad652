@@ -1,4 +1,4 @@
-name: Compare final optimized engine with submission baseline
+name: Compare production round4 with submitted baseline
 on:
   workflow_dispatch:
 permissions:
@@ -6,38 +6,47 @@ permissions:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        probe: [1, 2, 3]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Record actual CPU capability
+        id: cpu
+        run: |
+          mkdir -p reports/probe-${{ matrix.probe }}
+          lscpu | tee reports/probe-${{ matrix.probe }}/cpu.txt
+          if grep -q avx512bw /proc/cpuinfo; then echo 'avx512=true' >> "$GITHUB_OUTPUT"; else echo 'avx512=false' >> "$GITHUB_OUTPUT"; fi
       - uses: actions/setup-python@v5
+        if: steps.cpu.outputs.avx512 == 'true'
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
-      - name: Build exact baseline and production images
+        if: steps.cpu.outputs.avx512 == 'true'
+      - name: Build exact baseline and production PGO images
+        if: steps.cpu.outputs.avx512 == 'true'
         run: |
           mkdir /tmp/shopping-baseline
-          git archive d52cca7d96130444086754510f8e298d5390eb84 | tar -x -C /tmp/shopping-baseline
+          git archive 55c31f8825654cabcfbf7ab4888116e9e93d6183 | tar -x -C /tmp/shopping-baseline
           timeout 600 docker build -t shopping-sessions:baseline /tmp/shopping-baseline
-          mkdir /tmp/shopping-reference
-          git archive 992b7672b54988c773f6d78cb260b3af9a370c7e .bench/pgo-combined | tar -x -C /tmp/shopping-reference
-          timeout 600 docker build --target pgo -t shopping-sessions:reference /tmp/shopping-reference/.bench/pgo-combined
-          mkdir benchmark-results
           started=$(date +%s)
           timeout 600 docker build -t shopping-sessions:optimized .
-          echo "Production build seconds: $(($(date +%s)-started))" | tee benchmark-results/build-time.txt
-          docker image inspect shopping-sessions:optimized --format '{{.Size}}' > benchmark-results/image-size.txt
+          echo "Production build seconds: $(($(date +%s)-started))" | tee reports/probe-${{ matrix.probe }}/build-time.txt
+          docker image inspect shopping-sessions:optimized --format '{{.Size}}' > reports/probe-${{ matrix.probe }}/image-size.txt
       - name: Generate official twenty-million-event input
+        if: steps.cpu.outputs.avx512 == 'true'
         run: |
-          cargo build --release --locked --offline --manifest-path tests/generator/Cargo.toml
+          cargo build --release --locked --manifest-path tests/generator/Cargo.toml
           tests/generator/target/release/generate --seed 818 --events 20000000 --clicks 5000000 --threads 4 --output /tmp/shopping-data
-      - name: Alternate five full runs and compare every output row
-        run: |
-          lscpu > benchmark-results/cpu.txt
-          python tests/benchmark.py /tmp/shopping-data benchmark-results --repeats 5
+      - name: Alternate seven full runs and compare every output row
+        if: steps.cpu.outputs.avx512 == 'true'
+        run: python tests/benchmark.py /tmp/shopping-data reports/probe-${{ matrix.probe }} --repeats 7
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: round3-linux-production
-          path: benchmark-results/
+          name: round4-production-${{ matrix.probe }}
+          path: reports/

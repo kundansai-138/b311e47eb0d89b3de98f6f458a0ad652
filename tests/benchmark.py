@@ -21,7 +21,7 @@ def main():
     args.report.mkdir(parents=True, exist_ok=True)
     threads = 8
     quota = min(4, len(os.sched_getaffinity(0)))
-    variants = ["baseline", "reference", "optimized"]
+    variants = ["baseline", "optimized"]
     records = []
     first_outputs = {}
     with tempfile.TemporaryDirectory(prefix="shopping-benchmark-", ignore_cleanup_errors=True) as temp:
@@ -70,8 +70,7 @@ def main():
             print(f"{table}: all {tables[0].num_rows} rows exactly equal", flush=True)
         medians = {v: statistics.median(r["seconds"] for r in records if r["variant"] == v)
                    for v in variants}
-        report = {"baseline_commit": "d52cca7d96130444086754510f8e298d5390eb84",
-                  "reference_commit": "992b7672b54988c773f6d78cb260b3af9a370c7e", "reference_context": ".bench/pgo-combined",
+        report = {"baseline_commit": "55c31f8825654cabcfbf7ab4888116e9e93d6183",
                   "candidate_commit": os.environ.get("GITHUB_SHA", "local"), "threads": threads, "cpu_quota": quota, "memory_limit_bytes": 12*1024**3, "runs": records,
                   "medians_seconds": medians, "speedups": {v:medians["baseline"]/medians[v] for v in variants},
                   "exact_output_match": True}

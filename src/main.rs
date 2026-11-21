@@ -7,7 +7,9 @@ mod simd_sort;
 use record_layout::{can_pack, Packed, RecordLayout, Wide};
 #[cfg(feature = "swar-clock")]
 mod clock_word;
+mod exact_names;
 mod inline_person;
+use exact_names::ExactNames;
 mod parquet_output;
 mod timestamp_parser;
 use event_ids::{EventIdName, EventIdRemaps, LocalEventIds};
@@ -671,9 +673,9 @@ fn resolve_person(person: u64, remaps: &[Vec<u64>], worker_bits: u32) -> u64 {
     remaps[usize::try_from(worker).unwrap()][usize::try_from(local).unwrap()]
 }
 struct Catalog<'a> {
-    products: Map<&'a [u8], u32>,
+    products: ExactNames<'a>,
     categories: Vec<&'a [u8]>,
-    campaigns: Map<&'a [u8], u32>,
+    campaigns: ExactNames<'a>,
     campaign_values: Vec<(&'a [u8], &'a [u8])>,
     organic: u32,
 }
@@ -686,11 +688,11 @@ fn catalog<'a>(products: &'a [u8], campaigns: &'a [u8]) -> Catalog<'a> {
         .collect();
     categories.sort_unstable();
     categories.dedup();
-    let mut pm = Map::default();
+    let mut pm = ExactNames::default();
     for [p, c] in products_rows {
         pm.insert(p, categories.binary_search(&c).unwrap() as u32);
     }
-    let mut cm = Map::default();
+    let mut cm = ExactNames::default();
     let mut cv = Vec::new();
     for [id, channel] in rows::<2>(body(campaigns)) {
         cm.insert(id, cv.len() as u32);
@@ -814,12 +816,12 @@ fn parse_events<'a, L: RecordLayout>(
                         let Some(bytes) = tasks.get(i) else {
                             break;
                         };
-                        for f in rows::<7>(bytes) {
+                        rows::<7>(bytes).for_each(|f| {
                             if f[0].is_empty() {
-                                continue;
+                                return;
                             }
                             let Some(ingest) = timestamps.ingest(f[3]) else {
-                                continue;
+                                return;
                             };
                             let id = event_ids.intern(f[0]);
                             let hash = event_ids.hash(id);
@@ -851,7 +853,7 @@ fn parse_events<'a, L: RecordLayout>(
                                 revenue,
                                 category,
                             });
-                        }
+                        });
                     }
                     (result, people.names, event_ids.names)
                 })
@@ -1435,24 +1437,24 @@ fn parse_clicks<'a, L: RecordLayout>(
                         let Some(bytes) = tasks.get(i) else {
                             break;
                         };
-                        for [id, user, camp, time] in rows::<4>(bytes) {
+                        rows::<4>(bytes).for_each(|[id, user, camp, time]| {
                             if id.is_empty() || user.is_empty() {
-                                continue;
+                                return;
                             }
                             let Some(&campaign) = catalog.campaigns.get(camp) else {
-                                continue;
+                                return;
                             };
                             let Some(ts) = timestamps.parse(time) else {
-                                continue;
+                                return;
                             };
                             if ts < start - WEEK || ts >= end {
-                                continue;
+                                return;
                             }
                             // An unlinked ID absent from all validated event
                             // candidates cannot own a surviving session. Linked
                             // aliases are all present in the complete dictionary.
                             let Some(person) = identity.lookup(user) else {
-                                continue;
+                                return;
                             };
                             output[person_partition(person, partitions)].push(Click::<L> {
                                 person,
@@ -1460,7 +1462,7 @@ fn parse_clicks<'a, L: RecordLayout>(
                                 ts: L::encode(ts, 0, 0, start - WEEK).0,
                                 campaign,
                             });
-                        }
+                        });
                     }
                     output
                 })

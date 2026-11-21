@@ -9,8 +9,8 @@ fn run(command: &mut Command) {
     assert!(status.success(), "native compilation failed: {command:?}");
 }
 
-fn compile(out: &Path) -> PathBuf {
-    let suffix = "avx2";
+fn compile(out: &Path, avx512: bool) -> PathBuf {
+    let suffix = if avx512 { "avx512" } else { "avx2" };
     let object = out.join(format!("sort_{suffix}.o"));
     let mut compiler = Command::new(env::var_os("CXX").unwrap_or_else(|| "g++".into()));
     compiler.args([
@@ -34,7 +34,16 @@ fn compile(out: &Path) -> PathBuf {
         "-mpclmul",
         "-Ivendor/highway",
     ]);
-
+    if avx512 {
+        // Highway AVX3 / Skylake server subset; does not enable Ice Lake ISAs.
+        compiler.args([
+            "-mavx512f",
+            "-mavx512cd",
+            "-mavx512dq",
+            "-mavx512bw",
+            "-mavx512vl",
+        ]);
+    }
     compiler.arg(format!("-DSHOPPING_SORT_NAME=shopping_sort128_{suffix}"));
     // Isolate even target-independent weak inline helpers between ISA objects.
     // This prevents compiler auto-vectorization from bypassing runtime gates.
@@ -59,8 +68,10 @@ fn main() {
         return;
     }
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR"));
-    let objects = [compile(&out)];
-
+    let mut objects = vec![compile(&out, false)];
+    if env::var_os("CARGO_FEATURE_VQSORT_AVX512").is_some() {
+        objects.push(compile(&out, true));
+    }
     let mut archive = Command::new(env::var_os("AR").unwrap_or_else(|| "ar".into()));
     archive
         .arg("crs")

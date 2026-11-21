@@ -1,5 +1,5 @@
 // Highway is vendored under vendor/highway; see its LICENSE and provenance.
-// This translation unit uses only the runtime-checked AVX2 instruction set.
+// Each isolated instance uses its runtime-checked AVX2 or AVX512 feature set.
 #define HWY_HEADER_ONLY
 #define HWY_COMPILE_ONLY_STATIC
 #define VQSORT_ONLY_STATIC 1

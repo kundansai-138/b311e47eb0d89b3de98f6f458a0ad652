@@ -1,4 +1,4 @@
-FROM rust:1.90.0-bookworm AS source
+FROM rust:1.100.0-bookworm AS source
 WORKDIR /build
 RUN command -v g++ && command -v ar
 COPY Cargo.toml Cargo.lock ./
