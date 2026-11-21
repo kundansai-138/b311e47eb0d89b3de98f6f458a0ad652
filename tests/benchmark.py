@@ -21,7 +21,7 @@ def main():
     args.report.mkdir(parents=True, exist_ok=True)
     threads = 8
     quota = min(4, len(os.sched_getaffinity(0)))
-    variants = ["baseline", "dedup", "dedup-slots", "timestamps", "layout", "aes"]
+    variants = ["baseline", "combined", "dense"]
     records = []
     first_outputs = {}
     with tempfile.TemporaryDirectory(prefix="shopping-benchmark-", ignore_cleanup_errors=True) as temp:

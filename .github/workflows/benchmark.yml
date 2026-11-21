@@ -1,4 +1,4 @@
-name: Compare round-two Linux candidates
+name: Compare combined round-two candidates
 on:
   workflow_dispatch:
 permissions:
@@ -16,7 +16,7 @@ jobs:
       - name: Build exact baseline and isolated candidates
         run: |
           timeout 600 docker build -t shopping-sessions:baseline .
-          for variant in dedup timestamps layout aes; do
+          for variant in combined dense; do
             timeout 600 docker build -t shopping-sessions:$variant .bench/$variant
           done
       - name: Generate official twenty-million-event dataset
