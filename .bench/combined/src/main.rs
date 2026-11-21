@@ -1173,7 +1173,8 @@ fn run() -> io::Result<()> {
     // Tiny fixtures need one part, not dozens of empty files. Full datasets
     // retain four independent partitions per CPU for balanced work queues.
     let event_bytes: usize = event_data.iter().map(|f| f.len()).sum();
-    let partitions = (event_bytes / CHUNK).clamp(1, ncpu * 4);
+    let partition_factor = std::env::var("ROUND2_PARTITION_FACTOR").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(4).clamp(1,64);
+    let partitions = (event_bytes / CHUNK).clamp(1, ncpu * partition_factor);
     let event_tasks = chunks(&event_data);
     let raw = parse_events(
         &event_tasks,

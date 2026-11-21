@@ -21,7 +21,9 @@ def main():
     args.report.mkdir(parents=True, exist_ok=True)
     threads = 8
     quota = min(4, len(os.sched_getaffinity(0)))
-    variants = ["baseline", "combined", "dense"]
+    variants = ["baseline", "dt32", "dt128", "inline32", "inline64", "inline128", "inline256"]
+    images = {v: ("baseline" if v == "baseline" else "combined" if v.startswith("dt") else "inline") for v in variants}
+    factors = {"baseline": 4, "dt32": 4, "dt128": 16, "inline32": 4, "inline64": 8, "inline128": 16, "inline256": 32}
     records = []
     first_outputs = {}
     with tempfile.TemporaryDirectory(prefix="shopping-benchmark-", ignore_cleanup_errors=True) as temp:
@@ -45,8 +47,8 @@ def main():
                        "-v", f"{output}:/output", "-v", f"{scratch}:/scratch",
                        "-e", "DATA_DIR=/data", "-e", "OUTPUT_DIR=/output", "-e", "SCRATCH_DIR=/scratch",
                        "-e", "HOME=/scratch", "-e", f"NCPU={threads}", "-e", "MEM_GB=12",
-                       f"shopping-sessions:{'dedup' if variant == 'dedup-slots' else variant}"]
-                cmd[-1:-1] = ["-e", "ROUND2_DEDUP_MODE=" + ("slots" if variant == "dedup-slots" else "linear")]
+                       f"shopping-sessions:{images[variant]}"]
+                cmd[-1:-1] = ["-e", "ROUND2_DEDUP_MODE=linear", "-e", f"ROUND2_PARTITION_FACTOR={factors[variant]}"]
                 log = args.report / f"{variant}-{repetition}.log"
                 try:
                     with log.open("w") as handle:
