@@ -21,7 +21,7 @@ def main():
     args.report.mkdir(parents=True, exist_ok=True)
     threads = 8
     quota = min(4, len(os.sched_getaffinity(0)))
-    variants = ["baseline", "combined", "pgo", "overlap", "overlap4", "partition"]
+    variants = ["combined", "vqsort", "vqsort-rust", "digits", "writer", "clicks"]
     records = []
     first_outputs = {}
     with tempfile.TemporaryDirectory(prefix="shopping-benchmark-", ignore_cleanup_errors=True) as temp:
@@ -45,8 +45,8 @@ def main():
                        "-v", f"{output}:/output", "-v", f"{scratch}:/scratch",
                        "-e", "DATA_DIR=/data", "-e", "OUTPUT_DIR=/output", "-e", "SCRATCH_DIR=/scratch",
                        "-e", "HOME=/scratch", "-e", f"NCPU={threads}", "-e", "MEM_GB=12",
-                       "-e", "ROUND3_CLICK_THREADS=4", "-e", "ROUND3_DEDUP_THREADS=" + ("4" if variant == "overlap4" else "8"),
-                       f"shopping-sessions:{'overlap' if variant == 'overlap4' else variant}"]
+                       "-e", "ROUND3_SORT=" + ("rust" if variant == "vqsort-rust" else "avx2"),
+                       f"shopping-sessions:{'vqsort' if variant == 'vqsort-rust' else variant}"]
                 log = args.report / f"{variant}-{repetition}.log"
                 try:
                     with log.open("w") as handle:
@@ -71,16 +71,16 @@ def main():
             print(f"{table}: all {tables[0].num_rows} rows exactly equal", flush=True)
         medians = {v: statistics.median(r["seconds"] for r in records if r["variant"] == v)
                    for v in variants}
-        report = {"baseline_commit": "d52cca7d96130444086754510f8e298d5390eb84",
+        report = {"control_variant": "combined", "control_source_commit": "992b7672b54988c773f6d78cb260b3af9a370c7e", "previous_submission_commit": "d52cca7d96130444086754510f8e298d5390eb84",
                   "candidate_commit": os.environ.get("GITHUB_SHA", "local"), "threads": threads, "cpu_quota": quota, "memory_limit_bytes": 12*1024**3, "runs": records,
-                  "medians_seconds": medians, "speedups": {v:medians["baseline"]/medians[v] for v in variants},
+                  "medians_seconds": medians, "speedups": {v:medians["combined"]/medians[v] for v in variants},
                   "exact_output_match": True}
         (args.report / "results.json").write_text(json.dumps(report, indent=2)+"\n")
         print(json.dumps(report), flush=True)
         # Fix permissions only inside this script-created temporary directory.
         # Timed runs above always use the scorer's non-root UID.
         command(["docker", "run", "--rm", "--network", "none", "--user", "0:0",
-                 "-v", f"{root}:/benchmark", "--entrypoint", "chmod", "shopping-sessions:baseline",
+                 "-v", f"{root}:/benchmark", "--entrypoint", "chmod", "shopping-sessions:combined",
                  "-R", "a+rwX", "/benchmark"])
 
 if __name__ == "__main__":
