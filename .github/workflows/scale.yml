@@ -1,0 +1,30 @@
+name: Validate sixty-million-event scale
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  scale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - run: timeout 600 docker build -t shopping-sessions:optimized .
+      - name: Generate official60M dataset with bounded generator concurrency
+        run: |
+          free -h
+          cargo build --release --locked --offline --manifest-path tests/generator/Cargo.toml
+          tests/generator/target/release/generate --seed 42 --events 60000000 --clicks 15000000 --threads 1 --output /tmp/shopping-scale-data
+      - name: Enforce12GiB and compare all output digests
+        run: python tests/scale_run.py /tmp/shopping-scale-data scale-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-scale
+          path: |
+            scale-results/results.json
+            scale-results/container.log

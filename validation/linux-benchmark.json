@@ -1,0 +1,58 @@
+{
+  "threads": 4,
+  "memory_limit_bytes": 12884901888,
+  "runs": [
+    {
+      "variant": "baseline",
+      "repetition": 0,
+      "seconds": 8.840033
+    },
+    {
+      "variant": "eager",
+      "repetition": 0,
+      "seconds": 7.614679
+    },
+    {
+      "variant": "optimized",
+      "repetition": 0,
+      "seconds": 7.217843
+    },
+    {
+      "variant": "eager",
+      "repetition": 1,
+      "seconds": 7.558402
+    },
+    {
+      "variant": "optimized",
+      "repetition": 1,
+      "seconds": 7.211269
+    },
+    {
+      "variant": "baseline",
+      "repetition": 1,
+      "seconds": 8.560134
+    },
+    {
+      "variant": "optimized",
+      "repetition": 2,
+      "seconds": 6.857389
+    },
+    {
+      "variant": "baseline",
+      "repetition": 2,
+      "seconds": 8.558815
+    },
+    {
+      "variant": "eager",
+      "repetition": 2,
+      "seconds": 7.394693
+    }
+  ],
+  "medians_seconds": {
+    "baseline": 8.560134,
+    "eager": 7.558402,
+    "optimized": 7.211269
+  },
+  "speedup": 1.1870496025040809,
+  "exact_output_match": true
+}

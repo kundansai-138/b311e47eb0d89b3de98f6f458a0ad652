@@ -11,3 +11,5 @@ __pycache__/
 /tests/generator/target/
 
 /benchmark-results/
+
+/scale-results/

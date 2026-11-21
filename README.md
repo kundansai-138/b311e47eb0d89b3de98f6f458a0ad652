@@ -61,7 +61,7 @@ On Windows PowerShell, set the same environment variables with `$env:NAME = 'val
 5. Sweep clicks with a rolling seven-day window and per-campaign counts. Each active campaign contributes one assist per session; no session-to-click Cartesian/range join is materialized.
 6. Aggregate campaign days in dense counters when the manifest/catalog dimensions are small, otherwise use sparse counters. Stream binary column buffers to scratch, then release native memory. Export independent Parquet parts concurrently with explicit DATE and nullable category types, without unnecessary dictionaries, compression, or statistics.
 
-Parsed event records occupy 64 bytes, surviving event records 40 bytes, and click records 56 bytes on x86-64. Original CSV buffers remain resident during native execution. This is an in-memory implementation, not a spill-to-disk engine; see `VALIDATION.md` for measured memory and runtime, including their limits.
+Parsed event records occupy 64 bytes, surviving event records 40 bytes, and click records 56 bytes on x86-64. Original CSV buffers remain resident during native execution. This is an in-memory implementation, not a spill-to-disk engine; see `PERFORMANCE.md` for the controlled Linux comparison and `VALIDATION.md` for correctness and resource checks.
 
 ## Files
 
