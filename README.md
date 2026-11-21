@@ -54,25 +54,28 @@ On Windows PowerShell, set the same environment variables with `$env:NAME = 'val
 
 ## Processing strategy
 
-1. Read all link files and resolve connected components with union by size and path compression. Track the bytewise minimum ID separately, including IDs absent from events and clicks.
-2. Scan commas, LF bytes, and quotes together using AVX2 (with a tested scalar fallback). Parse records once with the exact LF-only CSV dialect and precompute validation while the fields are available. Keep invalid copies as tombstones until global earliest-ingest deduplication; only the winning copy can survive. Hash collisions always compare original bytes.
-3. Validate timestamp calendars, offsets, windows, prices, event types, and lateness. Group surviving records by canonical person.
-4. Parse clicks and sort events/clicks by person hash and timestamp. Verify exact person bytes in every hash bucket, and repair the order of any colliding bucket. Build sessions from gaps greater than 30 minutes. The click order selects the latest eligible timestamp and the smallest bytewise click ID at that timestamp.
+1. Map each immutable input file once and distribute newline-aligned chunks among workers. Resolve linked identities with union by size and path compression, tracking the bytewise minimum across every linked ID, including unused aliases.
+2. Represent IDs of one to nine ASCII bytes exactly in a reversible 64-bit key. Length markers preserve NULs, leading zeroes, whitespace, and case. Longer/non-ASCII IDs use exact byte-keyed dictionaries and worker-to-global remaps; neither path assumes a generator-specific ID format.
+3. Scan commas, LF bytes, and quotes together using AVX2 with a tested scalar fallback. Keep only the numeric fields needed downstream. Non-purchase rows skip price conversion and product lookup. Invalid event copies remain tombstones until global earliest-ingest deduplication. Compact hash slots reference worker-owned records directly, avoiding a complete raw-record copy; exact ID tokens decide equality even when hashes collide.
+4. Cache strictly validated calendar dates using all ten original date bytes. Event/click timestamps retain full validation; only `ingest_ts`, guaranteed valid F1 by the rules, uses direct time decoding. Repartition survivors by canonical person, then sort by exact person key and timestamp. Sessions split at gaps greater than 30 minutes. Click ties retain the smallest original bytewise click ID.
 5. Sweep clicks with a rolling seven-day window and per-campaign counts. Each active campaign contributes one assist per session; no session-to-click Cartesian/range join is materialized.
 6. Aggregate campaign days in dense counters when the manifest/catalog dimensions are small, otherwise use sparse counters. Write Parquet parts directly from parallel partition workers, using bounded 131,072-row groups, explicit DATE and nullable category types, and plain uncompressed encoding without dictionaries or statistics. No intermediate column files are needed.
 
-Parsed event records occupy 64 bytes, surviving event records 40 bytes, and click records 56 bytes on x86-64. Read-only CSV mappings remain valid throughout native execution; pages are managed by the operating system. This is an in-memory implementation, not a spill-to-disk engine; see `PERFORMANCE.md` for the controlled Linux comparison and `VALIDATION.md` for correctness and resource checks.
+Parsed event records occupy 40 bytes, surviving event records 24 bytes, and click records 40 bytes on x86-64. Large inputs use up to 16 independent partitions per worker; tiny inputs use fewer. Capacity estimates affect allocation only, and all buffers can grow. Read-only CSV mappings remain valid throughout native execution. This is an in-memory implementation; see `PERFORMANCE.md` for the controlled Linux comparison and `VALIDATION.md` for correctness and resource checks.
 
 ## Files
 
 - `src/main.rs`: native parsing, identity resolution, deduplication, sessionization, and aggregation.
 - `src/fast_csv.rs`: fused SIMD/scalar strict CSV scanner and differential tests.
+- `src/inline_person.rs` and `src/event_ids.rs`: reversible ID keys and exact fallback remapping.
+- `src/timestamp_parser.rs`: strictly keyed calendar cache and ingest fast path.
 - `src/parquet_output.rs`: bounded-memory direct Parquet writers.
 - `pipeline/pipeline.py`: optional native executable launcher.
 - `rules.md`: supplied authoritative rules.
 - `fixtures/`: supplied input cases and expected answers, preserved byte-for-byte.
 - `tests/oracle.py`: independent, deliberately simple Python reference for small inputs.
 - `tests/generate_cases.py`: twelve focused adversarial cases plus 32 deterministic randomized cases.
+- `tests/generate_id_cases.py`: exact ID boundary cases and a cross-file, cross-worker fallback stress test.
 - `scripts/`: exact output comparison and scorer-style execution.
 - `VALIDATION.md`: correctness and resource verification.
 - `PERFORMANCE.md`: controlled Linux comparisons and full-scale measurements.

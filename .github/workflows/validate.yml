@@ -42,3 +42,8 @@ jobs:
           tests/generator/target/release/generate --seed 1 --events 1000000 --clicks 250000 --threads 2 --output /tmp/public-dev
           sh scripts/docker_run.sh /tmp/public-dev /tmp/public-dev-output
           python tests/check_dev.py /tmp/public-dev-output
+      - name: Exact ID fallback and cross-worker regression
+        run: |
+          python tests/generate_id_cases.py --output /tmp/exact-ids --large
+          CPUS=1 MEM=5g python scripts/run_fixtures.py /tmp/exact-ids -- sh scripts/docker_run.sh
+          CPUS=8 MEM=5g python scripts/run_fixtures.py /tmp/exact-ids -- sh scripts/docker_run.sh

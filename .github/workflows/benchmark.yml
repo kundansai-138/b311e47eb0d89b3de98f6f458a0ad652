@@ -15,18 +15,24 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
-      - name: Build baseline and current images
+      - name: Build baseline, compact-ID reference, and current images
         run: |
           mkdir /tmp/shopping-baseline
-          git archive 38cd60db715d1ecb9434e58578ae90fff4c8fd35 | tar -x -C /tmp/shopping-baseline
+          git archive 05a1cf788aa499b9c2d3fbaf2f03a437695d2749 | tar -x -C /tmp/shopping-baseline
           timeout 600 docker build -t shopping-sessions:baseline /tmp/shopping-baseline
+          mkdir /tmp/shopping-inline
+          git archive 6df9854756a575ae73517782a7fa96fae333fd98 .bench/inline | tar -x --strip-components=2 -C /tmp/shopping-inline
+          timeout 600 docker build -t shopping-sessions:inline /tmp/shopping-inline
           timeout 600 docker build -t shopping-sessions:optimized .
       - name: Generate twenty-million-event dataset
         run: |
           cargo build --release --locked --offline --manifest-path tests/generator/Cargo.toml
           tests/generator/target/release/generate --seed 818 --events 20000000 --clicks 5000000 --threads 4 --output /tmp/shopping-data
       - name: Alternate five runs per image and compare all output rows
-        run: python tests/benchmark.py /tmp/shopping-data benchmark-results --repeats 5
+        run: |
+          mkdir benchmark-results
+          lscpu > benchmark-results/cpu.txt
+          python tests/benchmark.py /tmp/shopping-data benchmark-results --repeats 5
       - uses: actions/upload-artifact@v4
         if: always()
         with:

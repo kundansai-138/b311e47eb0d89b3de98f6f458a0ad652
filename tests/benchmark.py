@@ -19,8 +19,9 @@ def main():
     parser.add_argument("--repeats", type=int, default=3)
     args = parser.parse_args()
     args.report.mkdir(parents=True, exist_ok=True)
-    threads = min(8, len(os.sched_getaffinity(0)))
-    variants = ["baseline", "optimized"]
+    threads = 8
+    quota = min(4, len(os.sched_getaffinity(0)))
+    variants = ["baseline", "inline", "optimized"]
     records = []
     first_outputs = {}
     with tempfile.TemporaryDirectory(prefix="shopping-benchmark-", ignore_cleanup_errors=True) as temp:
@@ -39,11 +40,12 @@ def main():
                 cmd = ["docker", "run", "--name", name, "--network", "none", "--read-only",
                        "--tmpfs", "/tmp:rw,size=64m,mode=1777", "--cap-drop", "ALL",
                        "--security-opt", "no-new-privileges", "--pids-limit", "4096",
-                       "--cpus", str(threads), "--memory", "12g", "--memory-swap", "12g",
+                       "--cpus", str(quota), "--memory", "12g", "--memory-swap", "12g",
                        "--user", "1000:1000", "-v", f"{args.data.resolve()}:/data:ro",
                        "-v", f"{output}:/output", "-v", f"{scratch}:/scratch",
                        "-e", "DATA_DIR=/data", "-e", "OUTPUT_DIR=/output", "-e", "SCRATCH_DIR=/scratch",
                        "-e", "HOME=/scratch", "-e", f"NCPU={threads}", "-e", "MEM_GB=12",
+                       "-e", "ROUND2_PARTITION_FACTOR=16",
                        f"shopping-sessions:{variant}"]
                 log = args.report / f"{variant}-{repetition}.log"
                 try:
@@ -69,8 +71,9 @@ def main():
             print(f"{table}: all {tables[0].num_rows} rows exactly equal", flush=True)
         medians = {v: statistics.median(r["seconds"] for r in records if r["variant"] == v)
                    for v in variants}
-        report = {"baseline_commit": "38cd60db715d1ecb9434e58578ae90fff4c8fd35",
-                  "candidate_commit": os.environ.get("GITHUB_SHA", "local"), "threads": threads, "memory_limit_bytes": 12*1024**3, "runs": records,
+        report = {"baseline_commit": "05a1cf788aa499b9c2d3fbaf2f03a437695d2749",
+                  "inline_reference_commit": "6df9854756a575ae73517782a7fa96fae333fd98",
+                  "candidate_commit": os.environ.get("GITHUB_SHA", "local"), "threads": threads, "cpu_quota": quota, "memory_limit_bytes": 12*1024**3, "runs": records,
                   "medians_seconds": medians, "speedup": medians["baseline"]/medians["optimized"],
                   "exact_output_match": True}
         (args.report / "results.json").write_text(json.dumps(report, indent=2)+"\n")
