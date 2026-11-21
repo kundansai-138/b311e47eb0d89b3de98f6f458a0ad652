@@ -6,6 +6,7 @@ COPY src/ ./src/
 ARG TARGETARCH
 RUN --mount=type=cache,id=shopping-cargo-registry,target=/usr/local/cargo/registry --mount=type=cache,id=shopping-cargo-target,target=/build/target set -eu; \
     if [ "$TARGETARCH" = "amd64" ]; then export RUSTFLAGS="-C target-cpu=x86-64-v3"; fi; \
+    touch src/*.rs; \
     cargo test --release --locked; \
     cargo build --release --locked --offline; \
     cp target/release/shopping-sessions /build/shopping-sessions
