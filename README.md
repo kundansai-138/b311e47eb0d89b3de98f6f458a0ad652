@@ -2,11 +2,11 @@
 
 Public submission repository: https://github.com/kundansai-138/shopping-sessions
 
-An implementation of scorer `shopping-sessions-4`, derived from the supplied Polars starter. A dependency-free Rust engine handles the input and aggregation; PyArrow converts the engine's column buffers to Parquet. The supplied 36 fixtures and scorer-style Docker wrapper are retained.
+An implementation of scorer `shopping-sessions-4`, derived from the supplied Polars starter. A native Rust engine handles parsing, aggregation, and direct Apache Parquet output. Immutable input files are memory-mapped, and an AVX2 scanner identifies CSV delimiters and quotes in one pass. The supplied 36 fixtures and scorer-style Docker wrapper are retained.
 
 ## Build and validate the submission
 
-The repository root contains the Dockerfile. Docker builds need network access to obtain the base images and the pinned PyArrow wheel. Execution needs no network.
+The repository root contains the Dockerfile. Docker builds need network access to obtain base images and the Cargo.lock-pinned Rust dependencies. Execution needs no network or Python. Python/PyArrow are used only by the external validation scripts.
 
 ```sh
 docker buildx build --platform linux/amd64 --load -t shopping-sessions:latest .
@@ -29,52 +29,53 @@ python3 scripts/compare.py out dev-answer
 python3 tests/check_dev.py out
 ```
 
-Use a fresh output folder on each run. The pipeline rejects existing output Parquet or an existing `native-output` scratch folder instead of silently combining results from separate runs. Keep generated datasets, output tables, scratch files, and build artifacts out of Git.
+Use a fresh output folder on each run. The engine rejects existing output Parquet. Keep input files unchanged for the entire run: memory-mapped slices borrow their contents, and the scorer supplies an immutable read-only `/data` mount. Keep generated datasets, output tables, scratch files, and build artifacts out of Git.
 
 ## Run directly without Docker
 
-Requires Rust 1.90 or newer and Python 3.12 with `requirements.txt` installed. The Rust crate has no third-party dependencies.
+Requires Rust 1.90 or newer. Fetch dependencies once during the build; the executable runs offline and writes Parquet directly. Python 3.12 with `requirements.txt` is needed only for comparison/fixture scripts.
 
 ```sh
-cargo build --release --locked --offline
+cargo build --release --locked
 DATA_DIR=/absolute/path/to/data \
 OUTPUT_DIR=/absolute/path/to/new-output \
 SCRATCH_DIR=/absolute/path/to/new-scratch \
-SHOPPING_ENGINE="$PWD/target/release/shopping-sessions" \
-NCPU=8 python3 pipeline/pipeline.py
+NCPU=8 ./target/release/shopping-sessions
+
+python3 scripts/run_fixtures.py fixtures -- ./target/release/shopping-sessions
+cargo test --release --locked --offline
+cargo run --release --locked --offline --example writer_smoke -- scratch/writer-smoke
+python3 tests/check_native_writer.py scratch/writer-smoke
 ```
 
-For the direct fixture runner, set `SHOPPING_ENGINE` to the absolute executable path; it assigns separate input, output, and scratch directories for each fixture:
-
-```sh
-SHOPPING_ENGINE="$PWD/target/release/shopping-sessions" \
-python3 scripts/run_fixtures.py fixtures -- python3 pipeline/pipeline.py
-cargo test --locked --offline
-```
+The optional `pipeline/pipeline.py` convenience launcher executes the native binary from `target/release`, or from the absolute path in `SHOPPING_ENGINE`. It does not import Arrow or export intermediate files.
 
 On Windows PowerShell, set the same environment variables with `$env:NAME = 'value'`, and use `target/release/shopping-sessions.exe`.
 
 ## Processing strategy
 
 1. Read all link files and resolve connected components with union by size and path compression. Track the bytewise minimum ID separately, including IDs absent from events and clicks.
-2. Parse records once with the exact LF-only CSV dialect and precompute validation while the fields are available. Keep invalid copies as tombstones until global earliest-ingest deduplication; only the winning copy can survive. Hash collisions always compare original bytes.
+2. Scan commas, LF bytes, and quotes together using AVX2 (with a tested scalar fallback). Parse records once with the exact LF-only CSV dialect and precompute validation while the fields are available. Keep invalid copies as tombstones until global earliest-ingest deduplication; only the winning copy can survive. Hash collisions always compare original bytes.
 3. Validate timestamp calendars, offsets, windows, prices, event types, and lateness. Group surviving records by canonical person.
 4. Parse clicks and sort events/clicks by person hash and timestamp. Verify exact person bytes in every hash bucket, and repair the order of any colliding bucket. Build sessions from gaps greater than 30 minutes. The click order selects the latest eligible timestamp and the smallest bytewise click ID at that timestamp.
 5. Sweep clicks with a rolling seven-day window and per-campaign counts. Each active campaign contributes one assist per session; no session-to-click Cartesian/range join is materialized.
-6. Aggregate campaign days in dense counters when the manifest/catalog dimensions are small, otherwise use sparse counters. Stream binary column buffers to scratch, then release native memory. Export independent Parquet parts concurrently with explicit DATE and nullable category types, without unnecessary dictionaries, compression, or statistics.
+6. Aggregate campaign days in dense counters when the manifest/catalog dimensions are small, otherwise use sparse counters. Write Parquet parts directly from parallel partition workers, using bounded 131,072-row groups, explicit DATE and nullable category types, and plain uncompressed encoding without dictionaries or statistics. No intermediate column files are needed.
 
-Parsed event records occupy 64 bytes, surviving event records 40 bytes, and click records 56 bytes on x86-64. Original CSV buffers remain resident during native execution. This is an in-memory implementation, not a spill-to-disk engine; see `PERFORMANCE.md` for the controlled Linux comparison and `VALIDATION.md` for correctness and resource checks.
+Parsed event records occupy 64 bytes, surviving event records 40 bytes, and click records 56 bytes on x86-64. Read-only CSV mappings remain valid throughout native execution; pages are managed by the operating system. This is an in-memory implementation, not a spill-to-disk engine; see `PERFORMANCE.md` for the controlled Linux comparison and `VALIDATION.md` for correctness and resource checks.
 
 ## Files
 
-- `src/main.rs`: native parser, identity resolution, aggregation, and column writer.
-- `pipeline/pipeline.py`: launcher and Parquet exporter.
+- `src/main.rs`: native parsing, identity resolution, deduplication, sessionization, and aggregation.
+- `src/fast_csv.rs`: fused SIMD/scalar strict CSV scanner and differential tests.
+- `src/parquet_output.rs`: bounded-memory direct Parquet writers.
+- `pipeline/pipeline.py`: optional native executable launcher.
 - `rules.md`: supplied authoritative rules.
 - `fixtures/`: supplied input cases and expected answers, preserved byte-for-byte.
 - `tests/oracle.py`: independent, deliberately simple Python reference for small inputs.
 - `tests/generate_cases.py`: twelve focused adversarial cases plus 32 deterministic randomized cases.
 - `scripts/`: exact output comparison and scorer-style execution.
-- `VALIDATION.md`: measured results and outstanding environment checks.
+- `VALIDATION.md`: correctness and resource verification.
+- `PERFORMANCE.md`: controlled Linux comparisons and full-scale measurements.
 
 ## Submission
 

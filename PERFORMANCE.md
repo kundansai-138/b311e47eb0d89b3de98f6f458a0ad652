@@ -1,3 +1,24 @@
+# Native SIMD and Parquet optimization
+
+Runtime commit `7e9ca62d657e29c79eba9a55eb2d37f23155226d` was compared with the previously submitted `38cd60db715d1ecb9434e58578ae90fff4c8fd35`. Both ran on the same GitHub Actions Ubuntu runner against official-generator seed 818: 20,000,000 events and 5,000,000 clicks. Five runs per image alternated order, with four CPUs/workers, 12 GiB memory, no swap/network, UID 1000, read-only root, and 64 MiB `/tmp`. Docker start-to-finish durations include the complete process lifetime and output writing.
+
+| Version | Run 1 | Run 2 | Run 3 | Run 4 | Run 5 | Median |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Previously submitted | 8.001s | 8.127s | 8.104s | 8.141s | 8.141s | **8.127s** |
+| Native SIMD / mapped inputs / Parquet | 6.442s | 6.269s | 6.172s | 6.323s | 6.543s | **6.323s** |
+
+The median runtime is **22.2% lower (1.285x speedup)**. All 2,245,254 user rows and 28,014 campaign rows match exactly after normalizing the accepted string representation. Results: https://github.com/kundansai-138/shopping-sessions/actions/runs/44844674470
+
+The implementation retains strict CSV/calendar validation and full-byte hash-collision checks. Changes are fused AVX2 delimiter/quote scanning with a tested scalar fallback, word-at-a-time hashing, bounded integer parsing, immutable memory-mapped inputs, and direct bounded-row-group Parquet output in Rust. The image no longer needs Python or Arrow at runtime. Comparison sorts remain: compact/radix experiments did not establish a reliable end-to-end advantage, and noisy local timings were not used to select them. No dataset IDs, timestamps, row counts, or outputs are hardcoded into execution.
+
+The full 60,000,000-event / 15,000,000-click seed42 regression completed in **19.935s**, with four CPUs, eight workers, and a hard 12 GiB memory limit. Peak cgroup memory was **5,842,042,880 bytes (5.44 GiB)**, including charged filesystem cache. Output plus scratch used **287,369,921 bytes**. Every output row matched a partition-independent canonical digest of the retained original validated output: 6,658,935 user rows and 28,014 campaign rows. This is an independent-run resource check, not a controlled speedup comparison with the historical 60M run. Results: https://github.com/kundansai-138/shopping-sessions/actions/runs/44844677475
+
+Machine-readable evidence is in `validation/linux-strategy-benchmark.json` and `validation/linux-strategy-scale.json`. These GitHub runner timings are not leaderboard scores. The competition uses different hardware; the new score requires submitting the new commit.
+
+---
+
+## Historical comparisons
+
 # Controlled Linux comparison
 
 The optimized code at commit `ac89d3274be54a70672cb8cf4fc2d3d1f697e6f8` was compared with the original implementation and the intermediate eager-parsing version on one GitHub Actions Ubuntu runner. The generated input used seed 818 with 20,000,000 events and 5,000,000 clicks.

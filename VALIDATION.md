@@ -1,6 +1,22 @@
 # Validation performed on 2026-11-21
 
-## Correctness
+## Current native SIMD / Parquet version
+
+The runtime at `7e9ca62d657e29c79eba9a55eb2d37f23155226d` passed:
+
+- 12 Rust correctness tests (the explicit parser microbenchmark is excluded), including SIMD/scalar differential CSV checks, every 32-byte block alignment, long fields, numeric boundaries, and forced event-ID/person hash collisions.
+- All 36 supplied fixtures plus the current 44 generated adversarial cases.
+- Exact public-development answer comparison: 117,038 user rows and 27,400 campaign rows, correct schemas and unique keys.
+- A direct-writer 131,077-row regression across two row groups, covering all-null and mixed-null categories, empty tables, DATE values, and exact Unicode/CR/tab/NUL strings.
+- The Linux container build, image-size check, all 80 fixtures under scorer filesystem restrictions, and public-dev digest check: https://github.com/kundansai-138/shopping-sessions/actions/runs/44844658232
+- Five alternating 20M runs per implementation: median 8.127s to 6.323s, with exact full-table equality.
+- The 60M regression: 19.935s, 5.44 GiB peak cgroup memory under a hard 12 GiB limit, and exact partition-independent original-output digests.
+
+The new scale digests were generated from the retained original validated output before running the new implementation. Their global key order permits a changed hash function or Parquet partition count without changing the reference values. The earlier per-part digests remain available for historical verification.
+
+See `PERFORMANCE.md` and `validation/linux-strategy-*.json` for benchmark conditions and evidence. Later documentation-only commits preserve this runtime.
+
+## Earlier correctness checks
 
 - All 36 supplied fixtures pass with exact row and schema comparison.
 - All 44 additional fixtures pass: twelve focused cases and 32 deterministic randomized cases. This includes partial-day manifests and the dense-to-sparse aggregation fallback.

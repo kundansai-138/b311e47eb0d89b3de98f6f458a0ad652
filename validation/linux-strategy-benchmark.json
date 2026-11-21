@@ -1,0 +1,64 @@
+{
+  "baseline_commit": "38cd60db715d1ecb9434e58578ae90fff4c8fd35",
+  "candidate_commit": "7e9ca62d657e29c79eba9a55eb2d37f23155226d",
+  "threads": 4,
+  "memory_limit_bytes": 12884901888,
+  "runs": [
+    {
+      "variant": "baseline",
+      "repetition": 0,
+      "seconds": 8.00086
+    },
+    {
+      "variant": "optimized",
+      "repetition": 0,
+      "seconds": 6.441818
+    },
+    {
+      "variant": "optimized",
+      "repetition": 1,
+      "seconds": 6.269332
+    },
+    {
+      "variant": "baseline",
+      "repetition": 1,
+      "seconds": 8.127104
+    },
+    {
+      "variant": "baseline",
+      "repetition": 2,
+      "seconds": 8.103575
+    },
+    {
+      "variant": "optimized",
+      "repetition": 2,
+      "seconds": 6.171758
+    },
+    {
+      "variant": "optimized",
+      "repetition": 3,
+      "seconds": 6.322716
+    },
+    {
+      "variant": "baseline",
+      "repetition": 3,
+      "seconds": 8.141333
+    },
+    {
+      "variant": "baseline",
+      "repetition": 4,
+      "seconds": 8.141169
+    },
+    {
+      "variant": "optimized",
+      "repetition": 4,
+      "seconds": 6.543466
+    }
+  ],
+  "medians_seconds": {
+    "baseline": 8.127104,
+    "optimized": 6.322716
+  },
+  "speedup": 1.2853817884592633,
+  "exact_output_match": true
+}
