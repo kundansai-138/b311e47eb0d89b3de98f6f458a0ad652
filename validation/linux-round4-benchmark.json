@@ -1,0 +1,133 @@
+{
+  "baseline_commit": "55c31f8825654cabcfbf7ab4888116e9e93d6183",
+  "reference_commit": "ed66f092cdf4b40d35718d0091ba9908100c5995",
+  "candidate_commit": "25f02ed9dc93fc021d340917d05c40785d7a1fe1",
+  "threads": 8,
+  "cpu_quota": 4,
+  "memory_limit_bytes": 12884901888,
+  "runs": [
+    {
+      "variant": "baseline",
+      "repetition": 0,
+      "seconds": 3.222378
+    },
+    {
+      "variant": "reference",
+      "repetition": 0,
+      "seconds": 2.657385
+    },
+    {
+      "variant": "optimized",
+      "repetition": 0,
+      "seconds": 2.664667
+    },
+    {
+      "variant": "reference",
+      "repetition": 1,
+      "seconds": 2.632314
+    },
+    {
+      "variant": "optimized",
+      "repetition": 1,
+      "seconds": 2.645637
+    },
+    {
+      "variant": "baseline",
+      "repetition": 1,
+      "seconds": 2.737689
+    },
+    {
+      "variant": "optimized",
+      "repetition": 2,
+      "seconds": 2.595882
+    },
+    {
+      "variant": "baseline",
+      "repetition": 2,
+      "seconds": 2.702314
+    },
+    {
+      "variant": "reference",
+      "repetition": 2,
+      "seconds": 2.656721
+    },
+    {
+      "variant": "baseline",
+      "repetition": 3,
+      "seconds": 2.717145
+    },
+    {
+      "variant": "reference",
+      "repetition": 3,
+      "seconds": 2.637131
+    },
+    {
+      "variant": "optimized",
+      "repetition": 3,
+      "seconds": 2.670387
+    },
+    {
+      "variant": "reference",
+      "repetition": 4,
+      "seconds": 2.687816
+    },
+    {
+      "variant": "optimized",
+      "repetition": 4,
+      "seconds": 2.647297
+    },
+    {
+      "variant": "baseline",
+      "repetition": 4,
+      "seconds": 2.752723
+    },
+    {
+      "variant": "optimized",
+      "repetition": 5,
+      "seconds": 2.652034
+    },
+    {
+      "variant": "baseline",
+      "repetition": 5,
+      "seconds": 2.752569
+    },
+    {
+      "variant": "reference",
+      "repetition": 5,
+      "seconds": 2.646421
+    },
+    {
+      "variant": "baseline",
+      "repetition": 6,
+      "seconds": 2.823683
+    },
+    {
+      "variant": "reference",
+      "repetition": 6,
+      "seconds": 2.690782
+    },
+    {
+      "variant": "optimized",
+      "repetition": 6,
+      "seconds": 2.742448
+    }
+  ],
+  "medians_seconds": {
+    "baseline": 2.752569,
+    "reference": 2.656721,
+    "optimized": 2.652034
+  },
+  "speedups": {
+    "baseline": 1.0,
+    "reference": 1.0360775557538784,
+    "optimized": 1.0379086391803423
+  },
+  "exact_output_match": true,
+  "source_run_id": 44867782921,
+  "source_probe": 1,
+  "source_artifact": "round4-production-1",
+  "cpu_model": "INTEL(R) XEON(R) PLATINUM 8573C",
+  "selected_original_variant": "optimized",
+  "reference_implementation": "fused CSV parser, same Rust1.100 PGO build",
+  "selected_implementation": "compact iterator CSV parser, same Rust1.100 PGO build"
+}

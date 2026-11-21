@@ -1,0 +1,725 @@
+{
+  "scope": "Read-only analysis of five retained normal-build screens; no new experiment.",
+  "baseline_commit": "55c31f8825654cabcfbf7ab4888116e9e93d6183",
+  "conditions": {
+    "events_requested": 20000000,
+    "clicks_requested": 5000000,
+    "seed": 818,
+    "cpu_quota": 4,
+    "workers": 8,
+    "memory_bytes": 12884901888,
+    "timing": "Docker StartedAt to FinishedAt, including process/container startup and teardown",
+    "correctness": "Each source reports exact equality of the first complete output per variant against baseline; later timing repetitions were not separately compared."
+  },
+  "method": {
+    "pairing": "Match candidate and control by repetition within the same runner/job; never pool absolute times across hosts or jobs, even for the same CPU model.",
+    "ratio_direction": "candidate/control; below1 is faster. A win is a strictly smaller duration in that repetition.",
+    "median_paired_ratio": "median(candidate_i/control_i)",
+    "ratio_of_medians": "median(candidate_i)/median(control_i); differs from the paired median under drift",
+    "paired_ratio_mad": "median absolute deviation of paired ratios; descriptive spread, not a confidence interval",
+    "sensitivity": "All five runs remain primary. For fused screens, uniformly exclude repetition0 from both candidate and control only as a sensitivity diagnostic.",
+    "limitations": "Five repetitions, shared-runner noise, multiple candidates and one generated seed do not establish statistical significance. Rotating five rounds across six/seven variants is not fully position-balanced; paired runs are not always adjacent."
+  },
+  "screens": [
+    {
+      "source": "work/round4-screen1/results.json",
+      "source_sha256": "c9a8ea9419bdacb1095629c004831d640dd5bf312d7498072cc456f0e84a05cb",
+      "host_model": "AMD EPYC 7763 64-Core Processor",
+      "host_vendor": "AuthenticAMD",
+      "avx512bw_reported": false,
+      "candidate_commit": "9277ba04a909b59341c93b893c12f8dc90b81084",
+      "build_mode": "ordinary identical Rust1.90 x86-64-v3",
+      "container_medians_seconds": {
+        "baseline": 2.56023,
+        "architecture": 2.594296,
+        "parser": 2.47344,
+        "inline": 2.561016,
+        "architecture1024": 2.592334
+      },
+      "versus_baseline": {
+        "architecture": {
+          "wins": 1,
+          "pairs": 5,
+          "median_paired_ratio": 1.009431,
+          "ratio_of_medians": 1.013306,
+          "paired_ratio_mad": 0.025324
+        },
+        "parser": {
+          "wins": 5,
+          "pairs": 5,
+          "median_paired_ratio": 0.965318,
+          "ratio_of_medians": 0.966101,
+          "paired_ratio_mad": 0.007659
+        },
+        "inline": {
+          "wins": 3,
+          "pairs": 5,
+          "median_paired_ratio": 0.998616,
+          "ratio_of_medians": 1.000307,
+          "paired_ratio_mad": 0.012437
+        },
+        "architecture1024": {
+          "wins": 1,
+          "pairs": 5,
+          "median_paired_ratio": 1.023737,
+          "ratio_of_medians": 1.012539,
+          "paired_ratio_mad": 0.009743
+        }
+      }
+    },
+    {
+      "source": "work/round4-vectors/probe-1/results.json",
+      "source_sha256": "8b81ff6a3ed1b9395e3b3b45f2d3fd52942eafcebfe4080d96e7e79284cc73ca",
+      "host_model": "AMD EPYC 9V74 80-Core Processor",
+      "host_vendor": "AuthenticAMD",
+      "avx512bw_reported": true,
+      "candidate_commit": "c072c2908fe52f4a257ba2e3a90542bd38ec63b4",
+      "build_mode": "ordinary identical Rust1.90 x86-64-v3",
+      "container_medians_seconds": {
+        "baseline": 2.155282,
+        "catalog": 2.152202,
+        "combined": 2.146141,
+        "vector_avx2": 2.122744,
+        "vector_sort": 2.081868,
+        "vector_parser": 2.185814,
+        "vector": 2.15727
+      },
+      "versus_baseline": {
+        "catalog": {
+          "wins": 4,
+          "pairs": 5,
+          "median_paired_ratio": 0.998571,
+          "ratio_of_medians": 0.998571,
+          "paired_ratio_mad": 0.013443
+        },
+        "combined": {
+          "wins": 2,
+          "pairs": 5,
+          "median_paired_ratio": 1.000193,
+          "ratio_of_medians": 0.995759,
+          "paired_ratio_mad": 0.007822
+        },
+        "vector_avx2": {
+          "wins": 4,
+          "pairs": 5,
+          "median_paired_ratio": 0.9821,
+          "ratio_of_medians": 0.984903,
+          "paired_ratio_mad": 0.000613
+        },
+        "vector_sort": {
+          "wins": 4,
+          "pairs": 5,
+          "median_paired_ratio": 0.974566,
+          "ratio_of_medians": 0.965938,
+          "paired_ratio_mad": 0.01332
+        },
+        "vector_parser": {
+          "wins": 0,
+          "pairs": 5,
+          "median_paired_ratio": 1.014166,
+          "ratio_of_medians": 1.014166,
+          "paired_ratio_mad": 0.001344
+        },
+        "vector": {
+          "wins": 2,
+          "pairs": 5,
+          "median_paired_ratio": 1.004129,
+          "ratio_of_medians": 1.000922,
+          "paired_ratio_mad": 0.005734
+        }
+      },
+      "component_comparisons": {
+        "catalog/baseline": {
+          "wins": 4,
+          "pairs": 5,
+          "median_paired_ratio": 0.998571,
+          "ratio_of_medians": 0.998571,
+          "paired_ratio_mad": 0.013443
+        },
+        "combined/catalog": {
+          "wins": 2,
+          "pairs": 5,
+          "median_paired_ratio": 1.007037,
+          "ratio_of_medians": 0.997184,
+          "paired_ratio_mad": 0.019335
+        },
+        "vector_sort/vector_avx2": {
+          "wins": 4,
+          "pairs": 5,
+          "median_paired_ratio": 0.992297,
+          "ratio_of_medians": 0.980744,
+          "paired_ratio_mad": 0.006064
+        },
+        "vector_parser/vector_avx2": {
+          "wins": 0,
+          "pairs": 5,
+          "median_paired_ratio": 1.032786,
+          "ratio_of_medians": 1.029712,
+          "paired_ratio_mad": 0.008325
+        },
+        "vector/vector_sort": {
+          "wins": 1,
+          "pairs": 5,
+          "median_paired_ratio": 1.036218,
+          "ratio_of_medians": 1.036218,
+          "paired_ratio_mad": 0.008394
+        }
+      }
+    },
+    {
+      "source": "work/round4-vectors/probe-3/results.json",
+      "source_sha256": "01c943e2d431031904d4830069a2fe58817cd9d9ee9847b004112f06d0f0fafe",
+      "host_model": "INTEL(R) XEON(R) PLATINUM 8573C",
+      "host_vendor": "GenuineIntel",
+      "avx512bw_reported": true,
+      "candidate_commit": "c072c2908fe52f4a257ba2e3a90542bd38ec63b4",
+      "build_mode": "ordinary identical Rust1.90 x86-64-v3",
+      "container_medians_seconds": {
+        "baseline": 2.757571,
+        "catalog": 2.735472,
+        "combined": 2.720974,
+        "vector_avx2": 2.758537,
+        "vector_sort": 2.692596,
+        "vector_parser": 2.76768,
+        "vector": 2.699499
+      },
+      "versus_baseline": {
+        "catalog": {
+          "wins": 3,
+          "pairs": 5,
+          "median_paired_ratio": 0.998201,
+          "ratio_of_medians": 0.991986,
+          "paired_ratio_mad": 0.023915
+        },
+        "combined": {
+          "wins": 5,
+          "pairs": 5,
+          "median_paired_ratio": 0.989245,
+          "ratio_of_medians": 0.986729,
+          "paired_ratio_mad": 0.00277
+        },
+        "vector_avx2": {
+          "wins": 3,
+          "pairs": 5,
+          "median_paired_ratio": 0.994762,
+          "ratio_of_medians": 1.00035,
+          "paired_ratio_mad": 0.01124
+        },
+        "vector_sort": {
+          "wins": 5,
+          "pairs": 5,
+          "median_paired_ratio": 0.977224,
+          "ratio_of_medians": 0.976438,
+          "paired_ratio_mad": 0.014279
+        },
+        "vector_parser": {
+          "wins": 2,
+          "pairs": 5,
+          "median_paired_ratio": 1.003835,
+          "ratio_of_medians": 1.003666,
+          "paired_ratio_mad": 0.006119
+        },
+        "vector": {
+          "wins": 5,
+          "pairs": 5,
+          "median_paired_ratio": 0.981363,
+          "ratio_of_medians": 0.978941,
+          "paired_ratio_mad": 0.001784
+        }
+      },
+      "component_comparisons": {
+        "catalog/baseline": {
+          "wins": 3,
+          "pairs": 5,
+          "median_paired_ratio": 0.998201,
+          "ratio_of_medians": 0.991986,
+          "paired_ratio_mad": 0.023915
+        },
+        "combined/catalog": {
+          "wins": 5,
+          "pairs": 5,
+          "median_paired_ratio": 0.991028,
+          "ratio_of_medians": 0.9947,
+          "paired_ratio_mad": 0.006442
+        },
+        "vector_sort/vector_avx2": {
+          "wins": 5,
+          "pairs": 5,
+          "median_paired_ratio": 0.979079,
+          "ratio_of_medians": 0.976096,
+          "paired_ratio_mad": 0.003715
+        },
+        "vector_parser/vector_avx2": {
+          "wins": 2,
+          "pairs": 5,
+          "median_paired_ratio": 1.003541,
+          "ratio_of_medians": 1.003314,
+          "paired_ratio_mad": 0.010561
+        },
+        "vector/vector_sort": {
+          "wins": 2,
+          "pairs": 5,
+          "median_paired_ratio": 1.004235,
+          "ratio_of_medians": 1.002564,
+          "paired_ratio_mad": 0.012186
+        }
+      }
+    },
+    {
+      "source": "work/round4-fused-screen/probe-2/results.json",
+      "source_sha256": "5703016b03fecd0d85761660b6dd0dddb1e05ca6e7e52c7155ae794ec4c61e70",
+      "host_model": "INTEL(R) XEON(R) PLATINUM 8573C",
+      "host_vendor": "GenuineIntel",
+      "avx512bw_reported": true,
+      "candidate_commit": "c4c17dff826ace4dfd600abeaf8b2d115c96d500",
+      "build_mode": "ordinary x86-64-v3; Rust1.90 except fused_new Rust1.100.0",
+      "container_medians_seconds": {
+        "baseline": 2.438155,
+        "vector_sort": 2.348479,
+        "fused_avx2": 2.387794,
+        "fused": 2.362936,
+        "fusedpreload": 2.363035,
+        "fused_new": 2.328487
+      },
+      "versus_baseline": {
+        "vector_sort": {
+          "wins": 5,
+          "pairs": 5,
+          "median_paired_ratio": 0.962406,
+          "ratio_of_medians": 0.96322,
+          "paired_ratio_mad": 0.012348
+        },
+        "fused_avx2": {
+          "wins": 4,
+          "pairs": 5,
+          "median_paired_ratio": 0.979345,
+          "ratio_of_medians": 0.979345,
+          "paired_ratio_mad": 0.005804
+        },
+        "fused": {
+          "wins": 5,
+          "pairs": 5,
+          "median_paired_ratio": 0.969149,
+          "ratio_of_medians": 0.969149,
+          "paired_ratio_mad": 0.010213
+        },
+        "fusedpreload": {
+          "wins": 5,
+          "pairs": 5,
+          "median_paired_ratio": 0.968103,
+          "ratio_of_medians": 0.96919,
+          "paired_ratio_mad": 0.009105
+        },
+        "fused_new": {
+          "wins": 5,
+          "pairs": 5,
+          "median_paired_ratio": 0.95502,
+          "ratio_of_medians": 0.95502,
+          "paired_ratio_mad": 0.007715
+        }
+      },
+      "exclude_repetition_zero_sensitivity": {
+        "fused_new/baseline": {
+          "wins": 4,
+          "pairs": 4,
+          "median_paired_ratio": 0.957712,
+          "ratio_of_medians": 0.95671,
+          "paired_ratio_mad": 0.003858
+        },
+        "vector_sort/baseline": {
+          "wins": 4,
+          "pairs": 4,
+          "median_paired_ratio": 0.96858,
+          "ratio_of_medians": 0.967555,
+          "paired_ratio_mad": 0.008016
+        },
+        "fused_new/vector_sort": {
+          "wins": 3,
+          "pairs": 4,
+          "median_paired_ratio": 0.988802,
+          "ratio_of_medians": 0.988792,
+          "paired_ratio_mad": 0.009454
+        },
+        "fused/vector_sort": {
+          "wins": 2,
+          "pairs": 4,
+          "median_paired_ratio": 1.003045,
+          "ratio_of_medians": 1.003034,
+          "paired_ratio_mad": 0.012182
+        },
+        "fused_avx2/vector_sort": {
+          "wins": 1,
+          "pairs": 4,
+          "median_paired_ratio": 1.013938,
+          "ratio_of_medians": 1.014579,
+          "paired_ratio_mad": 0.014665
+        },
+        "fused_new/fused": {
+          "wins": 4,
+          "pairs": 4,
+          "median_paired_ratio": 0.984622,
+          "ratio_of_medians": 0.985801,
+          "paired_ratio_mad": 0.00118
+        },
+        "fused/fused_avx2": {
+          "wins": 4,
+          "pairs": 4,
+          "median_paired_ratio": 0.98696,
+          "ratio_of_medians": 0.98862,
+          "paired_ratio_mad": 0.002296
+        },
+        "fusedpreload/fused": {
+          "wins": 3,
+          "pairs": 4,
+          "median_paired_ratio": 0.995009,
+          "ratio_of_medians": 0.997068,
+          "paired_ratio_mad": 0.002381
+        }
+      },
+      "native_log_diagnostics": {
+        "precision_seconds": 0.001,
+        "first_baseline_container_seconds": 4.17513,
+        "first_baseline_native_seconds": 2.349,
+        "comparisons": {
+          "fused_new/baseline": {
+            "wins": 5,
+            "pairs": 5,
+            "median_paired_ratio": 0.958316,
+            "ratio_of_medians": 0.957908,
+            "paired_ratio_mad": 0.00527
+          },
+          "vector_sort/baseline": {
+            "wins": 5,
+            "pairs": 5,
+            "median_paired_ratio": 0.968072,
+            "ratio_of_medians": 0.966837,
+            "paired_ratio_mad": 0.006143
+          },
+          "fused_new/vector_sort": {
+            "wins": 3,
+            "pairs": 5,
+            "median_paired_ratio": 0.990765,
+            "ratio_of_medians": 0.990765,
+            "paired_ratio_mad": 0.014561
+          },
+          "fused/vector_sort": {
+            "wins": 2,
+            "pairs": 5,
+            "median_paired_ratio": 1.007036,
+            "ratio_of_medians": 1.007036,
+            "paired_ratio_mad": 0.011434
+          },
+          "fused_avx2/vector_sort": {
+            "wins": 1,
+            "pairs": 5,
+            "median_paired_ratio": 1.01715,
+            "ratio_of_medians": 1.01847,
+            "paired_ratio_mad": 0.009276
+          },
+          "fused_new/fused": {
+            "wins": 5,
+            "pairs": 5,
+            "median_paired_ratio": 0.983843,
+            "ratio_of_medians": 0.983843,
+            "paired_ratio_mad": 0.000531
+          },
+          "fused/fused_avx2": {
+            "wins": 5,
+            "pairs": 5,
+            "median_paired_ratio": 0.990056,
+            "ratio_of_medians": 0.988774,
+            "paired_ratio_mad": 0.002232
+          },
+          "fusedpreload/fused": {
+            "wins": 4,
+            "pairs": 5,
+            "median_paired_ratio": 0.997829,
+            "ratio_of_medians": 0.999563,
+            "paired_ratio_mad": 0.004396
+          }
+        }
+      },
+      "component_comparisons": {
+        "fused_new/vector_sort": {
+          "wins": 3,
+          "pairs": 5,
+          "median_paired_ratio": 0.992325,
+          "ratio_of_medians": 0.991487,
+          "paired_ratio_mad": 0.011861
+        },
+        "fused/vector_sort": {
+          "wins": 2,
+          "pairs": 5,
+          "median_paired_ratio": 1.007006,
+          "ratio_of_medians": 1.006156,
+          "paired_ratio_mad": 0.01022
+        },
+        "fused_avx2/vector_sort": {
+          "wins": 1,
+          "pairs": 5,
+          "median_paired_ratio": 1.0176,
+          "ratio_of_medians": 1.016741,
+          "paired_ratio_mad": 0.007324
+        },
+        "fused_new/fused": {
+          "wins": 5,
+          "pairs": 5,
+          "median_paired_ratio": 0.985421,
+          "ratio_of_medians": 0.985421,
+          "paired_ratio_mad": 0.001599
+        },
+        "fused/fused_avx2": {
+          "wins": 5,
+          "pairs": 5,
+          "median_paired_ratio": 0.988922,
+          "ratio_of_medians": 0.98959,
+          "paired_ratio_mad": 0.003923
+        },
+        "fusedpreload/fused": {
+          "wins": 3,
+          "pairs": 5,
+          "median_paired_ratio": 0.99593,
+          "ratio_of_medians": 1.000042,
+          "paired_ratio_mad": 0.004112
+        }
+      }
+    },
+    {
+      "source": "work/round4-fused-screen/probe-3/results.json",
+      "source_sha256": "2341852b96231c7b48a3d4128a91263f76666b89070222c43d42ec55745b9f0e",
+      "host_model": "AMD EPYC 9V74 80-Core Processor",
+      "host_vendor": "AuthenticAMD",
+      "avx512bw_reported": true,
+      "candidate_commit": "c4c17dff826ace4dfd600abeaf8b2d115c96d500",
+      "build_mode": "ordinary x86-64-v3; Rust1.90 except fused_new Rust1.100.0",
+      "container_medians_seconds": {
+        "baseline": 2.382862,
+        "vector_sort": 2.284133,
+        "fused_avx2": 2.298217,
+        "fused": 2.346688,
+        "fusedpreload": 2.342714,
+        "fused_new": 2.273072
+      },
+      "versus_baseline": {
+        "vector_sort": {
+          "wins": 4,
+          "pairs": 5,
+          "median_paired_ratio": 0.955246,
+          "ratio_of_medians": 0.958567,
+          "paired_ratio_mad": 0.017062
+        },
+        "fused_avx2": {
+          "wins": 5,
+          "pairs": 5,
+          "median_paired_ratio": 0.943969,
+          "ratio_of_medians": 0.964478,
+          "paired_ratio_mad": 0.052558
+        },
+        "fused": {
+          "wins": 4,
+          "pairs": 5,
+          "median_paired_ratio": 0.968104,
+          "ratio_of_medians": 0.984819,
+          "paired_ratio_mad": 0.018644
+        },
+        "fusedpreload": {
+          "wins": 3,
+          "pairs": 5,
+          "median_paired_ratio": 0.96986,
+          "ratio_of_medians": 0.983151,
+          "paired_ratio_mad": 0.035834
+        },
+        "fused_new": {
+          "wins": 4,
+          "pairs": 5,
+          "median_paired_ratio": 0.959758,
+          "ratio_of_medians": 0.953925,
+          "paired_ratio_mad": 0.036992
+        }
+      },
+      "exclude_repetition_zero_sensitivity": {
+        "fused_new/baseline": {
+          "wins": 3,
+          "pairs": 4,
+          "median_paired_ratio": 0.978254,
+          "ratio_of_medians": 0.959931,
+          "paired_ratio_mad": 0.031555
+        },
+        "vector_sort/baseline": {
+          "wins": 3,
+          "pairs": 4,
+          "median_paired_ratio": 0.95786,
+          "ratio_of_medians": 0.9595,
+          "paired_ratio_mad": 0.011145
+        },
+        "fused_new/vector_sort": {
+          "wins": 2,
+          "pairs": 4,
+          "median_paired_ratio": 1.011502,
+          "ratio_of_medians": 1.000449,
+          "paired_ratio_mad": 0.014296
+        },
+        "fused/vector_sort": {
+          "wins": 1,
+          "pairs": 4,
+          "median_paired_ratio": 1.020424,
+          "ratio_of_medians": 1.048831,
+          "paired_ratio_mad": 0.022228
+        },
+        "fused_avx2/vector_sort": {
+          "wins": 2,
+          "pairs": 4,
+          "median_paired_ratio": 0.999419,
+          "ratio_of_medians": 1.007037,
+          "paired_ratio_mad": 0.012152
+        },
+        "fused_new/fused": {
+          "wins": 2,
+          "pairs": 4,
+          "median_paired_ratio": 0.99911,
+          "ratio_of_medians": 0.95387,
+          "paired_ratio_mad": 0.036448
+        },
+        "fused/fused_avx2": {
+          "wins": 2,
+          "pairs": 4,
+          "median_paired_ratio": 1.005639,
+          "ratio_of_medians": 1.041502,
+          "paired_ratio_mad": 0.025871
+        },
+        "fusedpreload/fused": {
+          "wins": 1,
+          "pairs": 4,
+          "median_paired_ratio": 1.010507,
+          "ratio_of_medians": 1.003819,
+          "paired_ratio_mad": 0.016003
+        }
+      },
+      "native_log_diagnostics": {
+        "precision_seconds": 0.001,
+        "first_baseline_container_seconds": 2.814862,
+        "first_baseline_native_seconds": 2.25,
+        "comparisons": {
+          "fused_new/baseline": {
+            "wins": 4,
+            "pairs": 5,
+            "median_paired_ratio": 0.976984,
+            "ratio_of_medians": 0.985592,
+            "paired_ratio_mad": 0.019615
+          },
+          "vector_sort/baseline": {
+            "wins": 4,
+            "pairs": 5,
+            "median_paired_ratio": 0.957727,
+            "ratio_of_medians": 0.991896,
+            "paired_ratio_mad": 0.019403
+          },
+          "fused_new/vector_sort": {
+            "wins": 1,
+            "pairs": 5,
+            "median_paired_ratio": 1.005447,
+            "ratio_of_medians": 0.993645,
+            "paired_ratio_mad": 0.013153
+          },
+          "fused/vector_sort": {
+            "wins": 1,
+            "pairs": 5,
+            "median_paired_ratio": 1.025874,
+            "ratio_of_medians": 1.02769,
+            "paired_ratio_mad": 0.014103
+          },
+          "fused_avx2/vector_sort": {
+            "wins": 1,
+            "pairs": 5,
+            "median_paired_ratio": 1.00617,
+            "ratio_of_medians": 1.005901,
+            "paired_ratio_mad": 0.023714
+          },
+          "fused_new/fused": {
+            "wins": 3,
+            "pairs": 5,
+            "median_paired_ratio": 0.980088,
+            "ratio_of_medians": 0.966873,
+            "paired_ratio_mad": 0.028152
+          },
+          "fused/fused_avx2": {
+            "wins": 3,
+            "pairs": 5,
+            "median_paired_ratio": 0.99343,
+            "ratio_of_medians": 1.021661,
+            "paired_ratio_mad": 0.026247
+          },
+          "fusedpreload/fused": {
+            "wins": 3,
+            "pairs": 5,
+            "median_paired_ratio": 0.999558,
+            "ratio_of_medians": 0.978799,
+            "paired_ratio_mad": 0.020284
+          }
+        }
+      },
+      "component_comparisons": {
+        "fused_new/vector_sort": {
+          "wins": 2,
+          "pairs": 5,
+          "median_paired_ratio": 1.00218,
+          "ratio_of_medians": 0.995157,
+          "paired_ratio_mad": 0.007022
+        },
+        "fused/vector_sort": {
+          "wins": 1,
+          "pairs": 5,
+          "median_paired_ratio": 1.022173,
+          "ratio_of_medians": 1.027387,
+          "paired_ratio_mad": 0.008713
+        },
+        "fused_avx2/vector_sort": {
+          "wins": 2,
+          "pairs": 5,
+          "median_paired_ratio": 1.006166,
+          "ratio_of_medians": 1.006166,
+          "paired_ratio_mad": 0.024305
+        },
+        "fused_new/fused": {
+          "wins": 3,
+          "pairs": 5,
+          "median_paired_ratio": 0.98044,
+          "ratio_of_medians": 0.96863,
+          "paired_ratio_mad": 0.047579
+        },
+        "fused/fused_avx2": {
+          "wins": 3,
+          "pairs": 5,
+          "median_paired_ratio": 0.991375,
+          "ratio_of_medians": 1.021091,
+          "paired_ratio_mad": 0.022026
+        },
+        "fusedpreload/fused": {
+          "wins": 2,
+          "pairs": 5,
+          "median_paired_ratio": 1.001814,
+          "ratio_of_medians": 0.998307,
+          "paired_ratio_mad": 0.01462
+        }
+      }
+    }
+  ],
+  "conclusions": [
+    "Parser extraction is supported by screen1 on AMD7763:5/5 wins, paired ratio0.965318. This does not isolate fusion or AVX512.",
+    "AVX512 sorting is the most consistent isolated SIMD improvement: vector_sort/vector_avx2 gives4/5 wins and0.992297 on AMD9V74,5/5 and0.979079 on Intel8573C. The full vector_sort configuration beats baseline in both vector and fused-screen sessions.",
+    "Inline catalogs alone have a small uncertain whole-pipeline effect: paired ratios0.998571 AMD and0.998201 Intel, with4/5 and3/5 wins. Microbenchmark improvements should not be reported as pipeline improvements.",
+    "Unfused AVX512 CSV is unfavorable: vector_parser/vector_avx2 loses5/5 on AMD and3/5 on Intel; enabling it atop AVX512 sorting is also slower by paired medians. The fused AVX512 versus fused AVX2 comparison is favorable on Intel5/5 at0.988922 but unstable on AMD, where paired and unpaired medians disagree.",
+    "Rust1.90 fusion is not supported over the previous AVX512-sort/AVX2-CSV configuration: fused/vector_sort has2/5 wins, paired ratio1.007006 on Intel, and1/5,1.022173 on AMD. New compiler and source changes must not be conflated.",
+    "fused_new has container ratio-of-medians0.955020 versus baseline on Intel and0.953925 on AMD. Versus old-compiler vector_sort, however, Intel has3/5 wins and paired ratio0.992325; AMD has2/5 wins and1.002180 despite an unpaired0.995157. This is not a robust demonstrated fusion gain.",
+    "The clean compiler contrast fused_new/fused supports Rust1.100 on Intel5/5, paired ratio0.985421. AMD3/5 is noisier. These ordinary builds cannot establish the best final PGO build.",
+    "Preload does not show a repeatable practical gain: Intel3/5 paired0.995930 but unpaired1.000042; AMD2/5 paired1.001814. Its earlier page residency adds a memory tradeoff, so omit without production-PGO evidence.",
+    "The first Intel fused-screen baseline is4.175130s container versus2.349s native; AMD is2.814862s versus2.250s. This indicates unusually large non-native overhead in those observations; do not treat their raw paired wins as pure pipeline acceleration. Uniform drop-first diagnostics still support the overall configuration but do not resolve the small fusion comparison."
+  ],
+  "selection_criteria": [
+    "Use the running same-compiler production-PGO A(ed66 fused) versus B(25f02 unfused) comparison as the decisive fusion comparison. Require identical architecture flags, training corpus, output correctness and resource limits.",
+    "Prioritize scorer-relevant Intel results while retaining safe AVX2 fallback. Intel8573C results support ISA availability and direction but do not prove the same effect size on the stated Cascade Lake scorer or its CPU quota.",
+    "Prefer improvements whose paired median, ratio-of-medians and majority of paired runs agree, and whose effect persists beyond one ordering/outlier. Treat sub1% mixed-sign effects as unresolved rather than adding their advertised gains.",
+    "If final PGO A/B remains effectively tied, prefer the simpler unfused configuration; keep the clearer sort optimization. Do not retain preload solely for a small ordinary-build median change.",
+    "Validate the selected whole image, build-time budget, large-data memory and exact outputs before shipping. Compare overall delivery speed to baseline separately from attributing each component's effect; do not extrapolate these host timings to a new leaderboard score."
+  ]
+}

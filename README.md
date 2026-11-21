@@ -1,5 +1,22 @@
 # Shopping Sessions
 
+<!-- final-round4-report:begin -->
+## Latest validated runtime
+
+Runtime `25f02ed9dc93fc021d340917d05c40785d7a1fe1`: controlled 20M median **2.652034s**, versus **2.752569s** for `55c31f8`; **3.65% lower than the previous submission on the same runner**.
+
+The selected Rust 1.100.0 PGO runtime uses compact CSV separator masks, bounded short-ID loads, and exact integer-key catalog dictionaries. Packed-event sorting selects the C++ AVX 512 kernel when every required CPU/OS feature is available, with checked AVX 2 and Rust fallbacks. The simpler AVX 2 CSV iterator was retained after the fused/wider parser tied it in production comparisons. Independent workers, global earliest-ingest deduplication, strict validation, and exact fallback identifiers remain intact.
+
+The user reported 1.68 seconds for the preceding submission on the leaderboard. These GitHub runner timings do not establish a new leaderboard score.
+
+Evidence: [linux-round4-benchmark.json](validation/linux-round4-benchmark.json) and [linux-round4-scale.json](validation/linux-round4-scale.json). Exploratory and rejected experiments: [linux-round4-benchmark-amd.json](validation/linux-round4-benchmark-amd.json), [round4-experiments.json](validation/round4-experiments.json), [round4-screen-analysis.json](validation/round4-screen-analysis.json). Workflow records: [benchmark](https://github.com/kundansai-138/b311e47eb0d89b3de98f6f458a0ad652/actions/runs/44867782921), [scale](https://github.com/kundansai-138/b311e47eb0d89b3de98f6f458a0ad652/actions/runs/44867804242), [CI](https://github.com/kundansai-138/b311e47eb0d89b3de98f6f458a0ad652/actions/runs/44867781484).
+<!-- final-round4-report:end -->
+
+---
+
+## Existing build and runtime documentation
+
+
 Public submission repository: https://github.com/kundansai-138/b311e47eb0d89b3de98f6f458a0ad652
 
 An implementation of scorer `shopping-sessions-4`, derived from the supplied Polars starter. A Rust engine handles parsing, aggregation, and direct Apache Parquet output; checked C++ AVX2/AVX512 kernels accelerate packed-event sorting. Immutable input files are memory-mapped, and a runtime-selected vector scanner identifies CSV delimiters and quotes in one pass. The supplied 36 fixtures and scorer-style Docker wrapper are retained.

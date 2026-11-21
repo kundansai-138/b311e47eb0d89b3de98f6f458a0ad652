@@ -1,3 +1,29 @@
+<!-- final-round4-report:begin -->
+# Round-four controlled results
+
+Runtime `25f02ed9dc93fc021d340917d05c40785d7a1fe1`: controlled 20M median **2.652034s**, versus **2.752569s** for `55c31f8`; **3.65% lower than the previous submission on the same runner**.
+
+7 rotated runs per image, 4 CPU quota, 8 workers, 12 GiB memory, no swap/network, UID1000, read-only root and 64 MiB `/tmp`.
+
+| Variant | Run 1 | Run 2 | Run 3 | Run 4 | Run 5 | Run 6 | Run 7 | Median |
+| --- |  ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `baseline` | 3.222378s | 2.737689s | 2.702314s | 2.717145s | 2.752723s | 2.752569s | 2.823683s | **2.752569s** |
+| `reference` | 2.657385s | 2.632314s | 2.656721s | 2.637131s | 2.687816s | 2.646421s | 2.690782s | **2.656721s** |
+| `optimized` | 2.664667s | 2.645637s | 2.595882s | 2.670387s | 2.647297s | 2.652034s | 2.742448s | **2.652034s** |
+
+The selected Rust 1.100.0 PGO runtime uses compact CSV separator masks, bounded short-ID loads, and exact integer-key catalog dictionaries. Packed-event sorting selects the C++ AVX 512 kernel when every required CPU/OS feature is available, with checked AVX 2 and Rust fallbacks. The simpler AVX 2 CSV iterator was retained after the fused/wider parser tied it in production comparisons. Independent workers, global earliest-ingest deduplication, strict validation, and exact fallback identifiers remain intact.
+
+The separate 60M-event/15M-click regression completed in **9.507144s**, with 4 CPU quota, 8 workers and a hard 12 GiB limit. Peak cgroup memory was **4,187,877,376 bytes (3.90 GiB)**; output plus scratch used 287,360,157 bytes. Every output row matched the retained baseline digests. This is a resource/correctness regression; no cross-host 60M speedup is inferred.
+
+Evidence: [linux-round4-benchmark.json](validation/linux-round4-benchmark.json) and [linux-round4-scale.json](validation/linux-round4-scale.json). Exploratory and rejected experiments: [linux-round4-benchmark-amd.json](validation/linux-round4-benchmark-amd.json), [round4-experiments.json](validation/round4-experiments.json), [round4-screen-analysis.json](validation/round4-screen-analysis.json). Workflow records: [benchmark](https://github.com/kundansai-138/b311e47eb0d89b3de98f6f458a0ad652/actions/runs/44867782921), [scale](https://github.com/kundansai-138/b311e47eb0d89b3de98f6f458a0ad652/actions/runs/44867804242), [CI](https://github.com/kundansai-138/b311e47eb0d89b3de98f6f458a0ad652/actions/runs/44867781484).
+
+Exploratory results came from their own runs and are not pooled into the final medians. The user reported 1.68 seconds for the preceding submission on the leaderboard. These GitHub runner timings do not establish a new leaderboard score.
+<!-- final-round4-report:end -->
+
+---
+
+## Historical records
+
 <!-- final-round3-report:begin -->
 # Final checked layouts, native sorting and PGO
 

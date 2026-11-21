@@ -1,0 +1,126 @@
+{
+  "baseline_commit": "55c31f8825654cabcfbf7ab4888116e9e93d6183",
+  "reference_commit": "ed66f092cdf4b40d35718d0091ba9908100c5995",
+  "candidate_commit": "25f02ed9dc93fc021d340917d05c40785d7a1fe1",
+  "threads": 8,
+  "cpu_quota": 4,
+  "memory_limit_bytes": 12884901888,
+  "runs": [
+    {
+      "variant": "baseline",
+      "repetition": 0,
+      "seconds": 2.364559
+    },
+    {
+      "variant": "reference",
+      "repetition": 0,
+      "seconds": 2.05501
+    },
+    {
+      "variant": "optimized",
+      "repetition": 0,
+      "seconds": 2.059476
+    },
+    {
+      "variant": "reference",
+      "repetition": 1,
+      "seconds": 2.035152
+    },
+    {
+      "variant": "optimized",
+      "repetition": 1,
+      "seconds": 2.174009
+    },
+    {
+      "variant": "baseline",
+      "repetition": 1,
+      "seconds": 2.192112
+    },
+    {
+      "variant": "optimized",
+      "repetition": 2,
+      "seconds": 2.041866
+    },
+    {
+      "variant": "baseline",
+      "repetition": 2,
+      "seconds": 2.185097
+    },
+    {
+      "variant": "reference",
+      "repetition": 2,
+      "seconds": 2.023468
+    },
+    {
+      "variant": "baseline",
+      "repetition": 3,
+      "seconds": 2.189909
+    },
+    {
+      "variant": "reference",
+      "repetition": 3,
+      "seconds": 2.02605
+    },
+    {
+      "variant": "optimized",
+      "repetition": 3,
+      "seconds": 2.026888
+    },
+    {
+      "variant": "reference",
+      "repetition": 4,
+      "seconds": 2.009216
+    },
+    {
+      "variant": "optimized",
+      "repetition": 4,
+      "seconds": 2.024886
+    },
+    {
+      "variant": "baseline",
+      "repetition": 4,
+      "seconds": 2.159225
+    },
+    {
+      "variant": "optimized",
+      "repetition": 5,
+      "seconds": 1.990675
+    },
+    {
+      "variant": "baseline",
+      "repetition": 5,
+      "seconds": 2.158487
+    },
+    {
+      "variant": "reference",
+      "repetition": 5,
+      "seconds": 2.020018
+    },
+    {
+      "variant": "baseline",
+      "repetition": 6,
+      "seconds": 2.471164
+    },
+    {
+      "variant": "reference",
+      "repetition": 6,
+      "seconds": 2.000164
+    },
+    {
+      "variant": "optimized",
+      "repetition": 6,
+      "seconds": 2.018932
+    }
+  ],
+  "medians_seconds": {
+    "baseline": 2.189909,
+    "reference": 2.023468,
+    "optimized": 2.026888
+  },
+  "speedups": {
+    "baseline": 1.0,
+    "reference": 1.0822553161206405,
+    "optimized": 1.0804292097047297
+  },
+  "exact_output_match": true
+}

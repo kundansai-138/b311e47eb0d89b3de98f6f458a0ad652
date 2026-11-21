@@ -1,3 +1,21 @@
+<!-- final-round4-report:begin -->
+# Round-four validation
+
+Runtime `25f02ed9dc93fc021d340917d05c40785d7a1fe1` has exact final benchmark and scale evidence.
+
+Linux container CI passed 53 default-feature and 32 no-default-feature unit tests, 95 distinct fixture cases plus worker/SIMD repetitions, and the exact public-development comparison (117,038 user rows; 27,400 campaign rows). The final seven-run comparison checked every output row from the first run of each image: 2,245,254 user rows and 28,014 campaign rows. The selected build was faster than the preceding submission in all 14 paired runs across the two independent hosts. Intel medians were 2.752569 s to 2.652034 s (3.65%lower); AMD medians were 2.189909 s to 2.026888 s (7.44%lower). These per-host measurements are not pooled. The Intel benchmark image was 28,804,009 bytes and built in 101 seconds; its default target is the tested PGO runtime. All 290 supplied fixture files remain byte-identical.
+
+The separate 60M-event/15M-click regression completed in **9.507144s**, with 4 CPU quota, 8 workers and a hard 12 GiB limit. Peak cgroup memory was **4,187,877,376 bytes (3.90 GiB)**; output plus scratch used 287,360,157 bytes. Every output row matched the retained baseline digests. This is a resource/correctness regression; no cross-host 60M speedup is inferred.
+
+Evidence: [linux-round4-benchmark.json](validation/linux-round4-benchmark.json) and [linux-round4-scale.json](validation/linux-round4-scale.json). Exploratory and rejected experiments: [linux-round4-benchmark-amd.json](validation/linux-round4-benchmark-amd.json), [round4-experiments.json](validation/round4-experiments.json), [round4-screen-analysis.json](validation/round4-screen-analysis.json). Workflow records: [benchmark](https://github.com/kundansai-138/b311e47eb0d89b3de98f6f458a0ad652/actions/runs/44867782921), [scale](https://github.com/kundansai-138/b311e47eb0d89b3de98f6f458a0ad652/actions/runs/44867804242), [CI](https://github.com/kundansai-138/b311e47eb0d89b3de98f6f458a0ad652/actions/runs/44867781484).
+
+The benchmark harness records timing repetitions and exact-output comparison scope separately. The user reported 1.68 seconds for the preceding submission on the leaderboard. These GitHub runner timings do not establish a new leaderboard score.
+<!-- final-round4-report:end -->
+
+---
+
+## Historical records
+
 <!-- final-round3-report:begin -->
 # Final optimized runtime validation
 

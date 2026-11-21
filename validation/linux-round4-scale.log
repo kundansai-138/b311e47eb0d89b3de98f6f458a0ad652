@@ -1,0 +1,10 @@
+identities: 3594075 IDs, 0.829s
+record layout: packed
+event sort backend: avx512
+parsed events: 64487770, 5.586s
+interned people: local_unknown=0, unique_unknown=0, merge=0.000s, total=5.586s
+event ID remaps: 0, 5.586s
+validated events: 58694027, 6.767s
+validated clicks: 15271694, 7.576s
+wrote user_daily=6658935, campaign_daily=28014; native total 9.352s
+cgroup_memory_peak_bytes=4187877376

@@ -1,0 +1,14 @@
+{
+  "runtime_commit": "25f02ed9dc93fc021d340917d05c40785d7a1fe1",
+  "ci_run_id": 44867781484,
+  "ci_conclusion": "success",
+  "linux_unit_tests_default": 53,
+  "linux_unit_tests_no_default": 32,
+  "unique_pipeline_fixture_cases": 95,
+  "additional_checks": "Exact ID cases at1/8 workers; supplied/catalog cases also with explicit AVX2 sort; public development answer and60M baseline digests.",
+  "source_build_seconds_observed": 75,
+  "final_production_build_seconds_on_benchmark_intel": 101,
+  "runtime_image_bytes_on_benchmark_intel": 28804009,
+  "leaderboard_prior_user_reported_seconds": 1.68,
+  "new_leaderboard_score": null
+}
